@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}Einstellungen · {{ app_name }}{% endblock %}
+{% block page %}settings{% endblock %}
+{% block content %}
+<h1>Einstellungen</h1>
+<p class="subtitle">Stadt, Wetter, Datenschutz und Zugang.</p>
+
+<form id="settings-form">
+  <div class="grid-2">
+    <div class="panel">
+      <h2>Allgemein</h2>
+      <div class="field mt"><label>Stadtname</label>
+        <input name="city_name"></div>
+      <div class="field mt"><label>Stadt-Website (QR-Standardziel)</label>
+        <input name="city_website"></div>
+      <div class="field mt"><label>Ticker-Text (leer = aus)</label>
+        <input name="ticker_text"></div>
+      <div class="field mt"><label>Wechseldauer Szenen/Bilder (Sekunden, min. 3)</label>
+        <input name="scene_seconds" type="number" min="3" max="120"></div>
+      <div class="field mt"><label>Stadtlogo</label>
+        <select id="set-logo"></select></div>
+    </div>
+
+    <div class="panel">
+      <h2>Wetter</h2>
+      <div class="field"><label>Modus</label>
+        <select name="weather_mode">
+          <option value="manual">Manuell (keine externe Verbindung)</option>
+          <option value="open_meteo">Open-Meteo (externer Dienst – benötigt Internet)</option>
+        </select></div>
+      <div class="inline mt">
+        <span class="field"><label>Temperatur (°C)</label>
+          <input name="weather_manual_temp"></span>
+        <span class="field" style="flex:1"><label>Bedingung</label>
+          <input name="weather_manual_condition"></span>
+      </div>
+      <div class="inline mt">
+        <span class="field"><label>Breite (Lat)</label><input name="weather_lat"></span>
+        <span class="field"><label>Länge (Lon)</label><input name="weather_lon"></span>
+        <span class="field"><label>Abrufintervall (Min.)</label>
+          <input name="weather_interval_minutes" type="number" min="5"></span>
+      </div>
+      <p class="mt"><button type="button" class="btn secondary" id="weather-refresh">
+        Wetter jetzt abrufen (Test)</button></p>
+      <p class="muted" id="weather-result"></p>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Datenschutz / Externe Verbindungen</h2>
+    <label class="checkbox">
+      <input type="checkbox" name="allow_external">
+      Externe Dienste erlauben (Wetterabruf via Open-Meteo).
+      <strong>Nicht aktiviert = vollständig air-gap-fähig.</strong>
+    </label>
+    <p class="muted mt">Ohne diese Option verlässt kein Datenpaket das System:
+       keine externen Fonts, keine externen Karten-Tiles, keine CDN-Abfragen.</p>
+  </div>
+
+  <button class="btn" type="submit">Einstellungen speichern</button>
+</form>
+
+<div class="grid-2 mt">
+  <div class="panel">
+    <h2>Passwort ändern</h2>
+    <form id="pw-form" class="inline">
+      <span class="field"><label>Aktuelles Passwort</label>
+        <input type="password" name="old" required autocomplete="current-password"></span>
+      <span class="field"><label>Neues Passwort (min. 8 Zeichen)</label>
+        <input type="password" name="new" minlength="8" required
+               autocomplete="new-password"></span>
+      <button class="btn" type="submit">Ändern</button>
+    </form>
+  </div>
+  <div class="panel">
+    <h2>Backup</h2>
+    <p class="muted">Enthält Datenbank, Einstellungen und alle Medien.</p>
+    <a class="btn mt" href="/api/admin/backup" download>Backup herunterladen</a>
+    <p class="muted mt">Restore: Service stoppen → Backup entpacken und
+      <code>stadtdashboard.db</code>, <code>settings.json</code> sowie
+      <code>uploads/</code> nach <code>/opt/stadtdashboard/data/</code> kopieren →
+      Service starten.</p>
+  </div>
+</div>
+{% endblock %}

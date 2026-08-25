@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Zeitpläne · {{ app_name }}{% endblock %}
+{% block page %}schedules{% endblock %}
+{% block content %}
+<h1>Zeitpläne</h1>
+<p class="subtitle">
+  Layouts nach Uhrzeit und Wochentag zuweisen. Höhere Priorität gewinnt;
+  ohne Treffer gilt das Standardlayout.
+</p>
+
+<div class="grid-2">
+  <div class="panel">
+    <h2>Zeitplan bearbeiten</h2>
+    <form id="sched-form" onsubmit="return false">
+      <div class="inline">
+        <span class="field" style="flex:1"><label>Name *</label>
+          <input id="sched-name" placeholder="z. B. Abendprogramm"></span>
+        <span class="field"><label>Priorität (1–100)</label>
+          <input id="sched-priority" type="number" min="1" max="100" value="1"></span>
+        <button class="btn" id="sched-save" type="button">Speichern</button>
+        <button class="btn secondary" id="sched-new" type="button">Neu</button>
+      </div>
+      <h2 class="mt">Regeln</h2>
+      <div id="sched-rules"></div>
+      <button class="btn secondary mt" id="sched-add-rule" type="button">+ Regel</button>
+    </form>
+  </div>
+
+  <div class="panel">
+    <h2>Vorhandene Zeitpläne</h2>
+    <table>
+      <thead><tr><th>Name</th><th>Fenster</th><th></th></tr></thead>
+      <tbody id="sched-rows"></tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

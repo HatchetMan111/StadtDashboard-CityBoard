@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Layouts · {{ app_name }}{% endblock %}
+{% block page %}layouts{% endblock %}
+{% block content %}
+<h1>Layouts</h1>
+<p class="subtitle">
+  Widgets als JSON mit Positionen in Prozent (x, y, w, h). Vorschau unten rechts.
+</p>
+
+<div class="grid-2">
+  <div>
+    <div class="panel">
+      <table><tbody id="layout-list"></tbody></table>
+    </div>
+    <div class="panel">
+      <h2>Widget hinzufügen</h2>
+      <p style="display:flex;flex-wrap:wrap;gap:6px">
+        <button class="btn secondary small" data-widget="header">Kopf</button>
+        <button class="btn secondary small" data-widget="clock">Uhr</button>
+        <button class="btn secondary small" data-widget="date">Datum</button>
+        <button class="btn secondary small" data-widget="weather">Wetter</button>
+        <button class="btn secondary small" data-widget="forecast">Vorhersage</button>
+        <button class="btn secondary small" data-widget="text">Text</button>
+        <button class="btn secondary small" data-widget="image">Bild</button>
+        <button class="btn secondary small" data-widget="gallery">Bildergalerie</button>
+        <button class="btn secondary small" data-widget="events">Veranstaltungen</button>
+        <button class="btn secondary small" data-widget="announcements">Bekanntmachungen</button>
+        <button class="btn secondary small" data-widget="qr">QR-Code</button>
+        <button class="btn secondary small" data-widget="ticker">Ticker</button>
+      </p>
+    </div>
+  </div>
+
+  <div>
+    <div class="panel">
+      <form id="layout-form" class="inline" onsubmit="return false">
+        <span class="field" style="flex:1"><label>Name</label>
+          <input id="layout-name" value="Neues Layout"></span>
+        <span class="field"><label>Format</label>
+          <select id="layout-orientation">
+            <option value="landscape">Querformat</option>
+            <option value="portrait">Hochformat</option>
+          </select></span>
+        <button class="btn" id="layout-save" type="button">Speichern</button>
+        <button class="btn secondary" id="layout-new" type="button">Neu</button>
+      </form>
+    </div>
+    <div class="panel">
+      <h2>Elemente (JSON)</h2>
+      <textarea id="layout-json" rows="14"
+        style="width:100%;font-family:ui-monospace,monospace;font-size:12.5px">[]</textarea>
+    </div>
+    <div class="panel">
+      <h2>Vorschau</h2>
+      <div id="layout-preview" class="preview-box"></div>
+    </div>
+  </div>
+</div>
+{% endblock %}

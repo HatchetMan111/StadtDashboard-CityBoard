@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Datenschutz · {{ app_name }}{% endblock %}
+{% block page %}datenschutz{% endblock %}
+{% block content %}
+<h1>Datenschutz</h1>
+<p class="subtitle">Status externer Dienste dieser Installation.</p>
+
+<div class="panel">
+  <h2>Aktueller Status</h2>
+  <p><span class="badge" id="privacy-badge">wird geladen …</span></p>
+  <p class="muted mt" id="privacy-cache"></p>
+  <p class="mt"><a href="/settings">In den Einstellungen ändern →</a></p>
+</div>
+
+<div class="panel">
+  <h2>Bausteine dieser Software</h2>
+  <table>
+    <thead><tr><th>Funktion</th><th>Verbindung</th><th>Hinweis</th></tr></thead>
+    <tbody>
+      <tr><td>Uhr, Datum, Ticker</td><td><span class="badge ok">lokal</span></td>
+          <td>Keine externe Verbindung</td></tr>
+      <tr><td>QR-Codes</td><td><span class="badge ok">lokal</span></td>
+          <td>Wird serverseitig generiert, keine Tracking-Dienste</td></tr>
+      <tr><td>Bilder/Medien</td><td><span class="badge ok">lokal</span></td>
+          <td>Speicherung im Datenverzeichnis des Servers</td></tr>
+      <tr><td>Bekanntmachungen &amp; Kalender</td><td><span class="badge ok">lokal</span></td>
+          <td>SQLite-Datenbank lokal im Container</td></tr>
+      <tr><td>Schriftarten &amp; UI-Bibliotheken</td><td><span class="badge ok">lokal</span></td>
+          <td>Systemfonts, keine CDNs, keine externen Skripte</td></tr>
+      <tr><td>Wetter (manuell)</td><td><span class="badge ok">lokal</span></td>
+          <td>Werte werden vom Admin gepflegt</td></tr>
+      <tr><td>Wetter (Open-Meteo)</td>
+          <td><span class="badge warn">optional extern</span></td>
+          <td>Übermittelt Koordinaten an api.open-meteo.com; standardmäßig deaktiviert</td></tr>
+      <tr><td>Analytics / Tracking</td><td><span class="badge ok">nicht vorhanden</span></td>
+          <td>Es gibt keine Statistik-, Tracking- oder Fingerprint-Funktionen</td></tr>
+      <tr><td>Display-Anmeldung</td><td><span class="badge ok">lokal</span></td>
+          <td>Geraete-Token, im Admin koppelbar und sperrbar</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="panel">
+  <h2>Hinweise für den Betrieb</h2>
+  <ul style="padding-left:20px;line-height:1.7;font-size:14px">
+    <li>Displays sind öffentliche Bildschirme: keine personenbezogenen Daten auf
+        Bekanntmachungen anzeigen.</li>
+    <li>Webcams sind bewusst <strong>nicht</strong> Teil von Version 1 – bei späterer
+        Einführung sind Datenschutzprüfung, Hinweistexte und ggf. Maskierung Pflicht.</li>
+    <li>Admin-Zugang nur im geschützten Netzwerk bereitstellen; Passwort nach
+        Erstinstantzung sofort ändern (siehe <code>initial_admin_password.txt</code>).</li>
+    <li>Backups verschlüsselt und zugriffsbeschränkt aufbewahren.</li>
+  </ul>
+</div>
+{% endblock %}

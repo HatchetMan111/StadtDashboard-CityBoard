@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Medien · {{ app_name }}{% endblock %}
+{% block page %}media{% endblock %}
+{% block content %}
+<h1>Medien</h1>
+<p class="subtitle">Bilder und Videos für die Displays. Alles bleibt lokal gespeichert.</p>
+
+<div class="panel">
+  <form id="media-upload" class="inline">
+    <span class="field" style="flex:1"><label>Datei (JPG, PNG, GIF, WebP, SVG, MP4, WebM · max. 25 MB)</label>
+      <input type="file" id="media-input" accept=".jpg,.jpeg,.png,.gif,.webp,.svg,.mp4,.webm"></span>
+    <button class="btn" type="submit">Hochladen</button>
+  </form>
+</div>
+
+<div class="media-grid" id="media-grid"></div>
+{% endblock %}

@@ -1,0 +1,698 @@
+"""Admin-REST-API: Auth, Displays, Inhalte, Layouts, Zeitplaene, Einstellungen, Backup."""
+from __future__ import annotations
+
+import io
+import json
+import logging
+import sqlite3
+import tempfile
+import zipfile
+from datetime import datetime, timedelta
+from pathlib import Path
+
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi.responses import Response, StreamingResponse
+from pydantic import BaseModel, Field, field_validator
+from sqlalchemy.orm import Session
+
+from .. import config
+from ..auth import (
+    SESSION_COOKIE,
+    SESSION_TTL_SECONDS,
+    create_session,
+    hash_password,
+    require_admin,
+    verify_password,
+)
+from ..database import get_db
+from ..models import (
+    AdminUser,
+    Announcement,
+    Display,
+    Event,
+    Layout,
+    MediaItem,
+    Schedule,
+    Setting,
+)
+from ..seed import DEFAULT_SETTINGS, get_setting, set_setting
+from ..services import weather as weather_svc
+from ..services.state import build_state, now_local, resolve_elements
+from ..ws import manager
+
+router = APIRouter(prefix="/api/admin", tags=["admin"])
+log = logging.getLogger("stadtdashboard.admin")
+
+
+async def notify_displays() -> None:
+    await manager.broadcast({"type": "reload"})
+
+
+# ── Auth ────────────────────────────────────────────────────────────────────
+class LoginIn(BaseModel):
+    username: str
+    password: str
+
+
+class PasswordIn(BaseModel):
+    old: str
+    new: str = Field(min_length=8)
+
+
+@router.post("/login")
+def login(body: LoginIn, db: Session = Depends(get_db)) -> Response:
+    user = db.query(AdminUser).filter_by(username=body.username).first()
+    if not user or not verify_password(body.password, user.password_hash):
+        log.warning("login.failed username=%s", body.username)
+        raise HTTPException(status_code=401, detail="Benutzer oder Passwort falsch")
+    resp = Response(content='{"ok": true}', media_type="application/json")
+    resp.set_cookie(
+        SESSION_COOKIE,
+        create_session(user.username),
+        max_age=SESSION_TTL_SECONDS,
+        httponly=True,
+        samesite="lax",
+    )
+    return resp
+
+
+@router.post("/logout")
+def logout() -> Response:
+    resp = Response(content='{"ok": true}', media_type="application/json")
+    resp.delete_cookie(SESSION_COOKIE)
+    return resp
+
+
+@router.put("/password")
+def change_password(
+    body: PasswordIn, request_user: AdminUser = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> dict:
+    if not verify_password(body.old, request_user.password_hash):
+        raise HTTPException(status_code=400, detail="Altes Passwort ist falsch")
+    request_user.password_hash = hash_password(body.new)
+    db.commit()
+    return {"ok": True}
+
+
+# ── Displays ────────────────────────────────────────────────────────────────
+def _display_online(display: Display) -> bool:
+    return bool(
+        display.last_seen
+        and display.last_seen
+        >= datetime.utcnow() - timedelta(seconds=config.DISPLAY_ONLINE_SECONDS)
+    )
+
+
+@router.get("/displays")
+def list_displays(db: Session = Depends(get_db), _u=Depends(require_admin)) -> list[dict]:
+    out = []
+    for d in db.query(Display).order_by(Display.created_at.asc()).all():
+        out.append({
+            "id": d.id, "name": d.name, "location": d.location,
+            "resolution": d.resolution, "orientation": d.orientation,
+            "approved": d.approved, "enabled": d.enabled,
+            "online": _display_online(d),
+            "last_seen": d.last_seen.isoformat(timespec="seconds") if d.last_seen else None,
+            "layout_id": d.layout_id, "schedule_id": d.schedule_id,
+        })
+    return out
+
+
+class DisplayPatch(BaseModel):
+    name: str | None = Field(default=None, max_length=120)
+    location: str | None = Field(default=None, max_length=120)
+    enabled: bool | None = None
+    orientation: str | None = None
+    layout_id: int | None = None
+    schedule_id: int | None = None
+
+
+@router.patch("/displays/{device_id}")
+async def patch_display(
+    device_id: str, body: DisplayPatch,
+    db: Session = Depends(get_db), _u=Depends(require_admin),
+) -> dict:
+    d = db.get(Display, device_id)
+    if not d:
+        raise HTTPException(status_code=404, detail="Display nicht gefunden")
+    for key, value in body.model_dump(exclude_unset=True).items():
+        setattr(d, key, value)
+    db.commit()
+    await notify_displays()
+    return {"ok": True}
+
+
+@router.post("/displays/{device_id}/approve")
+def approve_display(
+    device_id: str, db: Session = Depends(get_db), _u=Depends(require_admin),
+) -> dict:
+    d = db.get(Display, device_id)
+    if not d:
+        raise HTTPException(status_code=404, detail="Display nicht gefunden")
+    d.approved = True
+    db.commit()
+    log.info("display.approved display_id=%s", device_id)
+    return {"ok": True}
+
+
+@router.post("/displays/{device_id}/revoke")
+def revoke_display(
+    device_id: str, db: Session = Depends(get_db), _u=Depends(require_admin),
+) -> dict:
+    """Token zuruecksetzen → Display muss neu gekoppelt werden."""
+    import secrets as _secrets
+
+    d = db.get(Display, device_id)
+    if not d:
+        raise HTTPException(status_code=404, detail="Display nicht gefunden")
+    d.token = _secrets.token_hex(24)
+    d.approved = False
+    db.commit()
+    log.info("display.revoked display_id=%s", device_id)
+    return {"ok": True}
+
+
+@router.delete("/displays/{device_id}")
+def delete_display(
+    device_id: str, db: Session = Depends(get_db), _u=Depends(require_admin),
+) -> dict:
+    d = db.get(Display, device_id)
+    if not d:
+        raise HTTPException(status_code=404, detail="Display nicht gefunden")
+    db.delete(d)
+    db.commit()
+    return {"ok": True}
+
+
+# ── Bekanntmachungen ────────────────────────────────────────────────────────
+class AnnouncementIn(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    body: str = ""
+    priority: int = Field(default=1, ge=1, le=5)
+    valid_from: datetime | None = None
+    valid_until: datetime | None = None
+    active: bool = True
+    qr_url: str = ""
+
+
+@router.get("/announcements")
+def list_announcements(db: Session = Depends(get_db), _u=Depends(require_admin)) -> list[dict]:
+    rows = (
+        db.query(Announcement)
+        .order_by(Announcement.priority.desc(), Announcement.created_at.desc())
+        .all()
+    )
+    now = now_local()
+    return [
+        {
+            **{k: getattr(a, k) for k in
+               ("id", "title", "body", "priority", "active", "qr_url")},
+            "valid_from": a.valid_from.isoformat(timespec="minutes") if a.valid_from else "",
+            "valid_until": a.valid_until.isoformat(timespec="minutes") if a.valid_until else "",
+            "currently_valid": bool(
+                a.active
+                and (not a.valid_from or now >= a.valid_from)
+                and (not a.valid_until or now <= a.valid_until)
+            ),
+        }
+        for a in rows
+    ]
+
+
+@router.post("/announcements")
+async def create_announcement(
+    body: AnnouncementIn, db: Session = Depends(get_db), _u=Depends(require_admin),
+) -> dict:
+    a = Announcement(**body.model_dump())
+    db.add(a)
+    db.commit()
+    await notify_displays()
+    return {"id": a.id}
+
+
+@router.patch("/announcements/{item_id}")
+async def update_announcement(
+    item_id: int, body: AnnouncementIn,
+    db: Session = Depends(get_db), _u=Depends(require_admin),
+) -> dict:
+    a = db.get(Announcement, item_id)
+    if not a:
+        raise HTTPException(status_code=404, detail="Nicht gefunden")
+    for key, value in body.model_dump().items():
+        setattr(a, key, value)
+    db.commit()
+    await notify_displays()
+    return {"ok": True}
+
+
+@router.delete("/announcements/{item_id}")
+async def delete_announcement(
+    item_id: int, db: Session = Depends(get_db), _u=Depends(require_admin),
+) -> dict:
+    a = db.get(Announcement, item_id)
+    if a:
+        db.delete(a)
+        db.commit()
+        await notify_displays()
+    return {"ok": True}
+
+
+# ── Veranstaltungen ─────────────────────────────────────────────────────────
+class EventIn(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    description: str = ""
+    start_at: datetime
+    end_at: datetime | None = None
+    location: str = ""
+    category: str = "Allgemein"
+    website: str = ""
+    featured: bool = False
+
+
+@router.get("/events")
+def list_events(db: Session = Depends(get_db), _u=Depends(require_admin)) -> list[dict]:
+    rows = db.query(Event).order_by(Event.start_at.asc()).all()
+    return [
+        {
+            **{k: getattr(e, k) for k in
+               ("id", "title", "description", "location", "category", "website",
+                "featured")},
+            "start_at": e.start_at.isoformat(timespec="minutes"),
+            "end_at": e.end_at.isoformat(timespec="minutes") if e.end_at else "",
+        }
+        for e in rows
+    ]
+
+
+@router.post("/events")
+async def create_event(
+    body: EventIn, db: Session = Depends(get_db), _u=Depends(require_admin),
+) -> dict:
+    e = Event(**body.model_dump())
+    db.add(e)
+    db.commit()
+    await notify_displays()
+    return {"id": e.id}
+
+
+@router.patch("/events/{item_id}")
+async def update_event(
+    item_id: int, body: EventIn,
+    db: Session = Depends(get_db), _u=Depends(require_admin),
+) -> dict:
+    e = db.get(Event, item_id)
+    if not e:
+        raise HTTPException(status_code=404, detail="Nicht gefunden")
+    for key, value in body.model_dump().items():
+        setattr(e, key, value)
+    db.commit()
+    await notify_displays()
+    return {"ok": True}
+
+
+@router.delete("/events/{item_id}")
+async def delete_event(
+    item_id: int, db: Session = Depends(get_db), _u=Depends(require_admin),
+) -> dict:
+    e = db.get(Event, item_id)
+    if e:
+        db.delete(e)
+        db.commit()
+        await notify_displays()
+    return {"ok": True}
+
+
+# ── Medien ──────────────────────────────────────────────────────────────────
+@router.get("/media")
+def list_media(db: Session = Depends(get_db), _u=Depends(require_admin)) -> list[dict]:
+    rows = db.query(MediaItem).order_by(MediaItem.created_at.desc()).all()
+    return [
+        {
+            **{k: getattr(m, k) for k in ("id", "title", "mime", "kind", "size")},
+            "original_name": m.original_name,
+            "url": f"/media/{m.id}",
+            "thumb_url": f"/media/{m.id}/thumb" if m.kind == "image" else "",
+        }
+        for m in rows
+    ]
+
+
+ALLOWED_EXT = config.ALLOWED_IMAGE_EXT | config.ALLOWED_VIDEO_EXT
+
+
+@router.post("/media")
+async def upload_media(
+    file: UploadFile = File(...),
+    title: str = "",
+    db: Session = Depends(get_db), _u=Depends(require_admin),
+) -> dict:
+    suffix = Path(file.filename or "").suffix.lower()
+    if suffix not in ALLOWED_EXT:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Dateityp '{suffix or '?'}' nicht erlaubt. Erlaubt: "
+                   f"{', '.join(sorted(ALLOWED_EXT))}",
+        )
+
+    limit = config.MAX_UPLOAD_MB * 1024 * 1024
+    payload = await file.read(limit + 1)
+    if len(payload) > limit:
+        raise HTTPException(
+            status_code=413, detail=f"Datei groesser als {config.MAX_UPLOAD_MB} MB"
+        )
+
+    kind = "video" if suffix in config.ALLOWED_VIDEO_EXT else "image"
+    filename = f"{datetime.utcnow().strftime('%Y%m%d%H%M%S')}_{config_upload_token()}{suffix}"
+    dest = config.UPLOAD_DIR / filename
+    dest.write_bytes(payload)
+
+    width = height = 0
+    thumb_name = None
+    if kind == "image" and suffix != ".svg":
+        try:
+            from PIL import Image
+
+            with Image.open(dest) as img:
+                width, height = img.size
+                thumb = img.convert("RGB") if img.mode not in ("RGB", "RGBA") else img.copy()
+                thumb.thumbnail((640, 640))
+                thumbs_dir = config.UPLOAD_DIR / "thumbs"
+                thumbs_dir.mkdir(exist_ok=True)
+                thumb_name = f"{Path(filename).stem}.jpg"
+                thumb.save(thumbs_dir / thumb_name, "JPEG", quality=80)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("thumbnail fehlgeschlagen %s: %s", filename, exc)
+
+    item = MediaItem(
+        filename=filename, original_name=file.filename or filename,
+        title=title or Path(file.filename or "Bild").stem, mime=file.content_type or "",
+        kind=kind, size=len(payload), width=width, height=height,
+    )
+    db.add(item)
+    db.commit()
+    await notify_displays()
+    return {"id": item.id, "kind": kind}
+
+
+def config_upload_token() -> str:
+    import secrets
+
+    return secrets.token_hex(6)
+
+
+@router.delete("/media/{item_id}")
+async def delete_media(
+    item_id: int, db: Session = Depends(get_db), _u=Depends(require_admin),
+) -> dict:
+    m = db.get(MediaItem, item_id)
+    if not m:
+        raise HTTPException(status_code=404, detail="Nicht gefunden")
+    try:
+        (config.UPLOAD_DIR / m.filename).unlink(missing_ok=True)
+        (config.UPLOAD_DIR / "thumbs" / f"{Path(m.filename).stem}.jpg").unlink(missing_ok=True)
+    except OSError as exc:
+        log.warning("Datei konnte nicht geloescht werden: %s", exc)
+    db.delete(m)
+    db.commit()
+    await notify_displays()
+    return {"ok": True}
+
+
+# ── Layouts ─────────────────────────────────────────────────────────────────
+WIDGET_TYPES = {
+    "header", "clock", "date", "weather", "forecast", "text", "image", "gallery",
+    "events", "announcements", "qr", "ticker",
+}
+
+
+class LayoutElement(BaseModel):
+    type: str
+    x: int = Field(ge=0, le=100)
+    y: int = Field(ge=0, le=100)
+    w: int = Field(ge=1, le=100)
+    h: int = Field(ge=1, le=100)
+    config: dict = {}
+
+    @field_validator("type")
+    @classmethod
+    def known_type(cls, v: str) -> str:
+        if v not in WIDGET_TYPES:
+            raise ValueError(f"Unbekannter Widget-Typ: {v}")
+        return v
+
+
+class LayoutIn(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    orientation: str = "landscape"
+    elements: list[LayoutElement] = []
+    is_default: bool = False
+
+
+@router.get("/layouts")
+def list_layouts(db: Session = Depends(get_db), _u=Depends(require_admin)) -> list[dict]:
+    return [
+        {
+            **{k: getattr(l, k) for k in ("id", "name", "orientation", "elements",
+                                          "is_default")},
+            "updated_at": l.updated_at.isoformat(timespec="seconds"),
+        }
+        for l in db.query(Layout).order_by(Layout.id.asc()).all()
+    ]
+
+
+@router.get("/layouts/{item_id}/state")
+def layout_preview_state(
+    item_id: int, db: Session = Depends(get_db), _u=Depends(require_admin),
+) -> dict:
+    """Vorschau-Zustand fuer das Admin-Layout-Preview (ohne Display-Token)."""
+    layout = db.get(Layout, item_id)
+    if not layout:
+        raise HTTPException(status_code=404, detail="Layout nicht gefunden")
+
+    class _PreviewDisplay:  # minimal-Stub
+        id = "preview"
+        name = "Vorschau"
+        layout_id = item_id
+        schedule_id = None
+
+    state = build_state(db, _PreviewDisplay())  # type: ignore[arg-type]
+    state["layout"]["orientation"] = layout.orientation
+    state["layout"]["elements"] = resolve_elements(db, layout.elements)
+    return state
+
+
+@router.post("/layouts")
+async def create_layout(
+    body: LayoutIn, db: Session = Depends(get_db), _u=Depends(require_admin),
+) -> dict:
+    l_ = Layout(
+        name=body.name, orientation=body.orientation,
+        elements=[e.model_dump() for e in body.elements],
+    )
+    if body.is_default:
+        db.query(Layout).update({Layout.is_default: False})
+        l_.is_default = True
+    db.add(l_)
+    db.commit()
+    await notify_displays()
+    return {"id": l_.id}
+
+
+@router.patch("/layouts/{item_id}")
+async def update_layout(
+    item_id: int, body: LayoutIn,
+    db: Session = Depends(get_db), _u=Depends(require_admin),
+) -> dict:
+    l_ = db.get(Layout, item_id)
+    if not l_:
+        raise HTTPException(status_code=404, detail="Layout nicht gefunden")
+    if l_.is_default and not body.is_default and db.query(Layout).count() == 1:
+        raise HTTPException(status_code=400, detail="Es muss ein Standardlayout geben")
+    l_.name = body.name
+    l_.orientation = body.orientation
+    l_.elements = [e.model_dump() for e in body.elements]
+    if body.is_default and not l_.is_default:
+        db.query(Layout).update({Layout.is_default: False})
+        l_.is_default = True
+    db.commit()
+    await notify_displays()
+    return {"ok": True}
+
+
+@router.delete("/layouts/{item_id}")
+async def delete_layout(
+    item_id: int, db: Session = Depends(get_db), _u=Depends(require_admin),
+) -> dict:
+    l_ = db.get(Layout, item_id)
+    if not l_:
+        raise HTTPException(status_code=404, detail="Layout nicht gefunden")
+    if l_.is_default:
+        raise HTTPException(status_code=400, detail="Standardlayout kann nicht geloescht werden")
+    used = (
+        db.query(Schedule).filter(Schedule.rules.like(f'%\"layout_id\": {item_id}%')).count()
+        + db.query(Display).filter(Display.layout_id == item_id).count()
+    )
+    if used:
+        raise HTTPException(status_code=409, detail="Layout wird noch verwendet")
+    db.delete(l_)
+    db.commit()
+    await notify_displays()
+    return {"ok": True}
+
+
+# ── Zeitpläne ───────────────────────────────────────────────────────────────
+class ScheduleRule(BaseModel):
+    start: str = "00:00"
+    end: str = "23:59"
+    weekdays: list[int] = [0, 1, 2, 3, 4, 5, 6]
+    layout_id: int
+
+
+class ScheduleIn(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    priority: int = Field(default=1, ge=1, le=100)
+    rules: list[ScheduleRule] = []
+
+
+@router.get("/schedules")
+def list_schedules(db: Session = Depends(get_db), _u=Depends(require_admin)) -> list[dict]:
+    return [
+        {
+            **{k: getattr(s, k) for k in ("id", "name", "priority", "rules")},
+        }
+        for s in db.query(Schedule).order_by(Schedule.priority.desc()).all()
+    ]
+
+
+@router.post("/schedules")
+async def create_schedule(
+    body: ScheduleIn, db: Session = Depends(get_db), _u=Depends(require_admin),
+) -> dict:
+    for rule in body.rules:
+        if not db.get(Layout, rule.layout_id):
+            raise HTTPException(status_code=400, detail="Regel verweist auf unbekanntes Layout")
+    s = Schedule(
+        name=body.name, priority=body.priority,
+        rules=[r.model_dump() for r in body.rules],
+    )
+    db.add(s)
+    db.commit()
+    await notify_displays()
+    return {"id": s.id}
+
+
+@router.patch("/schedules/{item_id}")
+async def update_schedule(
+    item_id: int, body: ScheduleIn,
+    db: Session = Depends(get_db), _u=Depends(require_admin),
+) -> dict:
+    s = db.get(Schedule, item_id)
+    if not s:
+        raise HTTPException(status_code=404, detail="Nicht gefunden")
+    s.name = body.name
+    s.priority = body.priority
+    s.rules = [r.model_dump() for r in body.rules]
+    db.commit()
+    await notify_displays()
+    return {"ok": True}
+
+
+@router.delete("/schedules/{item_id}")
+async def delete_schedule(
+    item_id: int, db: Session = Depends(get_db), _u=Depends(require_admin),
+) -> dict:
+    s = db.get(Schedule, item_id)
+    if s:
+        db.query(Display).filter(Display.schedule_id == item_id).update(
+            {Display.schedule_id: None}
+        )
+        db.delete(s)
+        db.commit()
+        await notify_displays()
+    return {"ok": True}
+
+
+# ── Einstellungen & Datenschutz ─────────────────────────────────────────────
+SETTING_KEYS = list(DEFAULT_SETTINGS.keys())
+
+
+@router.get("/settings")
+def get_settings(db: Session = Depends(get_db), _u=Depends(require_admin)) -> dict:
+    values = {key: get_setting(db, key, "") for key in SETTING_KEYS}
+    weather_cache_raw = get_setting(db, "weather_cache", "")
+    cache_info = {}
+    if weather_cache_raw:
+        try:
+            cache_info = {
+                "cached": True,
+                "fetched_at": datetime.fromtimestamp(
+                    json.loads(weather_cache_raw)["fetched_at"]
+                ).isoformat(timespec="seconds"),
+            }
+        except (ValueError, KeyError):  # noqa: PERF203
+            cache_info = {}
+    return {"values": values, "weather_cache": cache_info}
+
+
+class SettingsIn(BaseModel):
+    values: dict[str, str]
+
+
+@router.put("/settings")
+async def put_settings(
+    body: SettingsIn, db: Session = Depends(get_db), _u=Depends(require_admin),
+) -> dict:
+    changed_external = False
+    for key, value in body.values.items():
+        if key not in SETTING_KEYS:
+            continue
+        if key == "allow_external":
+            value = "true" if value == "true" else "false"
+            if value != get_setting(db, "allow_external"):
+                changed_external = True
+        set_setting(db, key, value[:2000])
+    if changed_external:
+        # Cache verwerfen, wenn externe Dienste deaktiviert wurden
+        set_setting(db, "weather_cache", "")
+    db.commit()
+    await notify_displays()
+    return {"ok": True}
+
+
+@router.post("/weather/refresh")
+def refresh_weather(db: Session = Depends(get_db), _u=Depends(require_admin)) -> dict:
+    set_setting(db, "weather_cache", "")
+    db.commit()
+    return weather_svc.current_weather(db)
+
+
+# ── Backup ──────────────────────────────────────────────────────────────────
+@router.get("/backup")
+def download_backup(db: Session = Depends(get_db), _u=Depends(require_admin)):
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        # Datenbank ueber SQLite-Backup-API konsistent sichern
+        with tempfile.NamedTemporaryFile(suffix=".db") as tmp:
+            src = sqlite3.connect(str(config.DB_PATH))
+            dst = sqlite3.connect(tmp.name)
+            with dst:
+                src.backup(dst)
+            dst.close()
+            src.close()
+            zf.write(tmp.name, "stadtdashboard.db")
+
+        settings = {row.key: row.value for row in db.query(Setting).all()}
+        zf.writestr("settings.json", json.dumps(settings, indent=2, ensure_ascii=False))
+
+        for path in sorted(config.UPLOAD_DIR.rglob("*")):
+            if path.is_file():
+                zf.write(path, f"uploads/{path.relative_to(config.UPLOAD_DIR)}")
+
+    stamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+    buf.seek(0)
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="application/zip",
+        headers={"Content-Disposition": f"attachment; filename=stadtdashboard-{stamp}.zip"},
+    )

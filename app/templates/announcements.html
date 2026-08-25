@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Bekanntmachungen · {{ app_name }}{% endblock %}
+{% block page %}announcements{% endblock %}
+{% block content %}
+<h1>Bekanntmachungen</h1>
+<p class="subtitle">Mit Priorität und Gültigkeitszeitraum – abgelaufene Meldungen verschwinden automatisch.</p>
+
+<div class="panel">
+  <h2 id="ann-form-title">Neu anlegen</h2>
+  <form id="ann-form" class="inline">
+    <span class="field" style="flex:2;min-width:220px"><label>Titel *</label>
+      <input name="title" required maxlength="200"></span>
+    <span class="field" style="flex:3;min-width:260px"><label>Text</label>
+      <textarea name="body" rows="2"></textarea></span>
+    <span class="field"><label>Priorität</label>
+      <select name="priority">
+        <option value="1">Info</option><option value="2">Kampagne</option>
+        <option value="3">Veranstaltung</option><option value="4">Wichtig</option>
+        <option value="5">Notfall</option>
+      </select></span>
+    <span class="field"><label>Gültig ab (leer = sofort)</label>
+      <input type="datetime-local" name="valid_from"></span>
+    <span class="field"><label>Gültig bis (leer = unbegrenzt)</label>
+      <input type="datetime-local" name="valid_until"></span>
+    <span class="field"><label>QR-Ziel-URL (optional)</label>
+      <input name="qr_url" placeholder="https://…"></span>
+    <span class="field checkbox"><input type="checkbox" name="active" checked> Aktiv</span>
+    <button class="btn" type="submit">Hinzufügen</button>
+  </form>
+</div>
+
+<div class="panel">
+  <table>
+    <thead><tr><th>Priorität</th><th>Meldung</th><th>Gültigkeit</th><th>Status</th><th></th></tr></thead>
+    <tbody id="ann-rows"></tbody>
+  </table>
+</div>
+{% endblock %}

@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Displays · {{ app_name }}{% endblock %}
+{% block page %}displays{% endblock %}
+{% block content %}
+<h1>Displays</h1>
+<p class="subtitle">
+  Geräte verwalten. Am Gerät <code>http://SERVER:8080/display</code> öffnen – das Display
+  erscheint dann hier mit Status „wartet auf Kopplung“.
+</p>
+<div class="panel">
+  <table>
+    <thead><tr><th>Status</th><th>Display</th><th>Layout / Zeitplan</th><th>Aktionen</th></tr></thead>
+    <tbody id="display-rows"></tbody>
+  </table>
+</div>
+
+<div class="modal-overlay" id="display-modal">
+  <div class="modal">
+    <h3>Display bearbeiten</h3>
+    <div class="row field"><label>Name</label><input name="dname"></div>
+    <div class="row field"><label>Standort</label><input name="dloc"></div>
+    <div class="row field"><label>Orientierung</label>
+      <select name="dorient">
+        <option value="landscape">Querformat (landscape)</option>
+        <option value="portrait">Hochformat (portrait)</option>
+      </select></div>
+    <div class="modal-actions">
+      <button class="btn secondary" id="display-modal-cancel">Abbrechen</button>
+      <button class="btn" id="display-modal-save">Speichern</button>
+    </div>
+  </div>
+</div>
+{% endblock %}

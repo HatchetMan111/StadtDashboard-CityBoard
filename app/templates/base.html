@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}{{ app_name }}{% endblock %}</title>
+  <link rel="stylesheet" href="/static/admin.css">
+</head>
+<body data-page="{% block page %}{% endblock %}">
+<div class="layout">
+  <aside class="sidebar">
+    <div class="brand">{{ app_name }}<span>v{{ version }} · Open Source</span></div>
+    <nav>
+      <a href="/" data-nav="dashboard">Dashboard</a>
+      <a href="/displays" data-nav="displays">Displays</a>
+      <a href="/announcements" data-nav="announcements">Bekanntmachungen</a>
+      <a href="/events" data-nav="events">Veranstaltungen</a>
+      <a href="/media" data-nav="media">Medien</a>
+      <a href="/layouts" data-nav="layouts">Layouts</a>
+      <a href="/schedules" data-nav="schedules">Zeitpläne</a>
+      <a href="/settings" data-nav="settings">Einstellungen</a>
+      <a href="/datenschutz" data-nav="datenschutz">Datenschutz</a>
+    </nav>
+    <div class="foot">
+      Angemeldet: {{ user }}
+      <button class="btn secondary small" id="logout-btn" style="width:100%">Abmelden</button>
+    </div>
+  </aside>
+  <main class="content">
+    {% block content %}{% endblock %}
+  </main>
+</div>
+<div id="toast"></div>
+<script src="/static/admin.js"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

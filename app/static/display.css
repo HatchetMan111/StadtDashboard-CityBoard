@@ -1,0 +1,95 @@
+/* StadtDashboard Display-Client – Vollbild, lesbar aus der Distanz */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { width: 100%; height: 100%; overflow: hidden;
+             background: #0b1220; color: #f1f5f9; cursor: none;
+             font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+
+#stage { position: absolute; inset: 0; }
+#stage.portrait { /* Widgets laufen über Prozentpositionen – Format egal */ }
+
+.widget { position: absolute; overflow: hidden; display: flex; flex-direction: column; }
+
+.w-header { flex-direction: row !important; align-items: center; gap: 2.2vmin; }
+.w-header img { max-height: 80%; max-width: 18%; object-fit: contain; }
+.w-header .city { font-size: 6.2vmin; font-weight: 800; text-transform: uppercase;
+                  letter-spacing: .06em; white-space: nowrap; }
+
+.w-clock { align-items: flex-end; justify-content: center; }
+.w-clock .time { font-size: 9vmin; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+.w-date { justify-content: center; align-items: flex-end;
+          font-size: 3vmin; color: #94a3b8; text-align: right; }
+
+.w-weather { flex-direction: row !important; align-items: center; gap: 1.4vmin; }
+.w-weather .temp { font-size: 7.5vmin; font-weight: 700; }
+.w-weather .cond { font-size: 2.6vmin; color: #cbd5e1; line-height: 1.15; }
+.w-weather.stale::after { content: " ◌"; opacity: .55; }
+
+.w-forecast { flex-direction: row !important; gap: 1vmin; align-items: stretch; }
+.w-forecast .day { flex: 1; background: rgba(255,255,255,.05); border-radius: 1vmin;
+                   padding: 1vmin; text-align: center; display: flex;
+                   flex-direction: column; justify-content: space-between; }
+.w-forecast .d-label { font-size: 2.2vmin; color: #94a3b8; font-weight: 600; }
+.w-forecast .d-max { font-size: 3.6vmin; font-weight: 700; }
+.w-forecast .d-min { font-size: 2.4vmin; color: #94a3b8; }
+.w-forecast .d-cond { font-size: 1.9vmin; color: #cbd5e1; }
+
+.w-text { justify-content: center; font-size: 4.6vmin; line-height: 1.35;
+          white-space: pre-wrap; }
+
+.w-image img, .w-image video { width: 100%; height: 100%; object-fit: cover;
+                               border-radius: 1.2vmin; background: #000; }
+
+.panel-bg { background: rgba(255,255,255,.055); border-radius: 1.4vmin; padding: 2vmin 2.4vmin; }
+
+.list-title { font-size: 2.4vmin; text-transform: uppercase; letter-spacing: .12em;
+              color: #7dd3fc; margin-bottom: 1.2vmin; font-weight: 700; }
+.w-events .item, .w-announcements .item { margin-bottom: 1.6vmin; }
+.w-events .when { font-size: 2.2vmin; color: #fbbf24; font-weight: 600;
+                  font-variant-numeric: tabular-nums; }
+.w-events .what { font-size: 2.9vmin; font-weight: 600; line-height: 1.25; }
+.w-events .where { font-size: 2.2vmin; color: #94a3b8; }
+.w-announcements .a-title { font-size: 3vmin; font-weight: 700; line-height: 1.25;
+                            border-left: .7vmin solid #38bdf8; padding-left: 1.2vmin; }
+.w-announcements .item.p5 .a-title { border-color: #ef4444; }
+.w-announcements .item.p4 .a-title { border-color: #fb923c; }
+.w-announcements .a-body { font-size: 2.3vmin; color: #cbd5e1; padding-left: 1.9vmin;
+                           margin-top: .4vmin; line-height: 1.3;
+                           display: -webkit-box; -webkit-line-clamp: 2;
+                           -webkit-box-orient: vertical; overflow: hidden; }
+
+.w-qr { align-items: center; justify-content: center; gap: 1.2vmin; }
+.w-qr img { height: 78%; aspect-ratio: 1; background: #fff; padding: 1vmin;
+            border-radius: 1vmin; }
+.w-qr .label { font-size: 2.2vmin; color: #cbd5e1; text-align: center; }
+
+.w-ticker { flex-direction: row !important; align-items: center;
+            background: rgba(255,255,255,.08); border-radius: 0; }
+.w-ticker .track { white-space: nowrap; font-size: 3.4vmin; animation:
+                   ticker-scroll 30s linear infinite; will-change: transform; }
+@keyframes ticker-scroll {
+  from { transform: translateX(100vw); }
+  to   { transform: translateX(-100%); }
+}
+
+/* Notfall-Banner */
+#emergency-banner { position: absolute; top: 0; left: 0; right: 0; z-index: 40;
+                    background: #dc2626; color: #fff; font-size: 4vmin; font-weight: 700;
+                    padding: 1.6vmin 3vmin; text-align: center; animation:
+                    emergency-pulse 2s ease-in-out infinite; }
+@keyframes emergency-pulse { 50% { filter: brightness(1.25); } }
+
+#stale-badge { position: absolute; left: 1.6vmin; bottom: 1.6vmin; z-index: 30;
+               background: rgba(217,119,6,.85); color: #fff; font-size: 2vmin;
+               padding: .8vmin 1.6vmin; border-radius: 999px; }
+
+/* Kopplungs-Wartebildschirm */
+#pairing { position: absolute; inset: 0; z-index: 50; display: flex;
+           align-items: center; justify-content: center; background: #0b1220; }
+.pair-card { text-align: center; max-width: 70vw; }
+.pair-card h1 { font-size: 8vmin; margin-bottom: 2vmin; }
+.pair-card p { font-size: 3.2vmin; margin-bottom: 1.2vmin; color: #cbd5e1; }
+.pair-card code { font-size: 4vmin; background: rgba(255,255,255,.08);
+                  padding: 1vmin 2.4vmin; border-radius: 1vmin; }
+
+.hidden { display: none !important; }

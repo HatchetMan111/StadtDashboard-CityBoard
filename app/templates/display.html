@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ app_name }} · Display</title>
+  <link rel="stylesheet" href="/static/display.css">
+</head>
+<body>
+  <div id="stage" class="landscape"></div>
+
+  <div id="emergency-banner" class="hidden">
+    <span id="emergency-text"></span>
+  </div>
+
+  <div id="stale-badge" class="hidden">Daten ggf. veraltet – Offline-Modus</div>
+
+  <div id="pairing" class="hidden">
+    <div class="pair-card">
+      <h1>{{ app_name }}</h1>
+      <p>Dieses Display wartet auf Freigabe.</p>
+      <p class="muted">Im Admin unter <strong>Displays</strong> mit „Koppeln“ freigeben.</p>
+      <code id="pair-id"></code>
+    </div>
+  </div>
+
+  <script src="/static/display.js"></script>
+</body>
+</html>

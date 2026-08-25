@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Veranstaltungen · {{ app_name }}{% endblock %}
+{% block page %}events{% endblock %}
+{% block content %}
+<h1>Veranstaltungen</h1>
+<p class="subtitle">Lokaler Veranstaltungskalender für die Displays.</p>
+
+<div class="panel">
+  <h2 id="ev-form-title">Neu anlegen</h2>
+  <form id="ev-form" class="inline">
+    <span class="field" style="flex:2;min-width:200px"><label>Titel *</label>
+      <input name="title" required maxlength="200"></span>
+    <span class="field" style="flex:3;min-width:240px"><label>Beschreibung</label>
+      <textarea name="description" rows="2"></textarea></span>
+    <span class="field"><label>Beginn *</label>
+      <input type="datetime-local" name="start_at" required></span>
+    <span class="field"><label>Ende (optional)</label>
+      <input type="datetime-local" name="end_at"></span>
+    <span class="field"><label>Ort</label><input name="location"></span>
+    <span class="field"><label>Kategorie</label><input name="category" value="Allgemein"></span>
+    <span class="field"><label>Website</label><input name="website" placeholder="https://…"></span>
+    <span class="field checkbox"><input type="checkbox" name="featured"> Highlight</span>
+    <button class="btn" type="submit">Hinzufügen</button>
+  </form>
+</div>
+
+<div class="panel">
+  <table>
+    <thead><tr><th>Termin</th><th>Veranstaltung</th><th>Ort</th><th></th><th></th></tr></thead>
+    <tbody id="ev-rows"></tbody>
+  </table>
+</div>
+{% endblock %}
