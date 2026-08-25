@@ -83,10 +83,27 @@ EOF
 }
 
 next_free_ctid() {
-  local used candidate=100
-  used=$(pct list 2>/dev/null | awk 'NR>1 {print $1}' || true)
-  while [[ " ${used} " == *" ${candidate} "* ]]; do candidate=$((candidate + 1)); done
+  # Naechste freie VMID ab Startwert – prueft pct (LXC), qm (VMs) und,
+  # falls verfuegbar, clusterweit via pvesh (andere Cluster-Nodes einschliessen).
+  local used candidate="$1"
+  used="$(
+    {
+      pct list 2>/dev/null | awk 'NR>1 && $1 ~ /^[0-9]+$/ {print $1}'
+      qm list 2>/dev/null | awk 'NR>1 && $1 ~ /^[0-9]+$/ {print $1}'
+      if command -v pvesh >/dev/null 2>&1; then
+        pvesh get /cluster/resources --type vm --output-format json 2>/dev/null \
+          | grep -oE '"vmid":[0-9]+' | grep -oE '[0-9]+$' || true
+      fi
+    } | sort -nu | tr '\n' ' '
+  )"
+  while [[ " ${used}" == *" ${candidate} "* ]]; do
+    candidate=$((candidate + 1))
+  done
   echo "$candidate"
+}
+
+is_existing_app_container() {
+  pct exec "$1" -- test -f "/opt/${APP}/.app-marker" >/dev/null 2>&1
 }
 
 ensure_template() {
@@ -104,11 +121,11 @@ ensure_template() {
 
 create_container() {
   local tmpl ip=""
-  ROOT_PW="$(openssl rand -base64 12 2>/dev/null || head -c 18 /dev/urandom | base64)"
   tmpl=$(ensure_template)
 
   msg_info "Erstelle LXC-Container ${CTID} (${APP_NAME})"
-  printf '%s\n' "$ROOT_PW" | pct create "$CTID" "local:vztmpl/${tmpl}" \
+  # Hinweis: kein Root-Passwort – Zugriff ueber 'pct enter ${CTID}' vom Host
+  pct create "$CTID" "local:vztmpl/${tmpl}" \
     --hostname "$APP" \
     --cores "$CORES" \
     --memory "$RAM_MB" \
@@ -118,10 +135,9 @@ create_container() {
     --unprivileged 1 \
     --onboot 1 \
     --start 1 \
-    --password-stdin >/dev/null
+    >/dev/null
   msg_ok "Container ${CTID} erstellt und gestartet"
 
-  # Root-Passwort des Containers (einmalig ausgegeben)
   msg_info "Warte auf Netzwerk im Container"
   for _ in $(seq 1 30); do
     ip=$(pct exec "$CTID" -- hostname -I 2>/dev/null | awk '{print $1}' || true)
@@ -173,15 +189,13 @@ summary() {
   echo -e "  Web UI       : ${BL}http://${ip}:${PORT}/${CL}"
   echo -e "  Display-URL  : ${BL}http://${ip}:${PORT}/display${CL}"
   echo -e "  Login        : admin"
-  if [[ -n "${ROOT_PW:-}" ]]; then
-    echo -e "  CT-Root-Passwort: ${ROOT_PW}"
-  fi
   if [[ -n "$pw_hint" ]]; then
     echo -e "  Init. Admin-Passwort: ${pw_hint}"
     echo -e "  ${DIM}(steht auch im Container: /opt/${APP}/data/initial_admin_password.txt)${CL}"
   fi
   echo ""
-  echo -e "  ${DIM}Update später: dieses Script erneut mit derselben CT-ID ausführen.${CL}"
+  echo -e "  ${DIM}Container-Zugang : pct enter ${CTID}${CL}"
+  echo -e "  ${DIM}Update später: dieses Script erneut ausführen (erkennt Installation automatisch).${CL}"
   echo -e "  ${DIM}Deinstallation: pct stop ${CTID} && pct destroy ${CTID}${CL}"
   echo ""
 }
@@ -192,31 +206,44 @@ main() {
   command -v pct >/dev/null 2>&1 || msg_fatal "Dieses Script gehört auf einen Proxmox-VE-Host ('pct' fehlt)."
   header
 
+  # ── CT-ID bestimmen ──
   if [[ -z "$CTID" ]]; then
-    local suggestion
-    suggestion=$(next_free_ctid)
-    read -rp "CT-ID für ${APP_NAME} [${suggestion}]: " input_id || true
-    CTID="${input_id:-$suggestion}"
+    local suggestion input_id=""
+    suggestion=$(next_free_ctid 100)
+    if [[ -t 0 ]]; then
+      read -rp "CT-ID für ${APP_NAME} [${suggestion}]: " input_id || true
+      CTID="${input_id:-$suggestion}"
+    else
+      CTID="$suggestion"
+      msg_info "Nicht-interaktiv gestartet → verwende freie CT-ID ${CTID}"
+    fi
   fi
   [[ "$CTID" =~ ^[0-9]+$ ]] || msg_fatal "Ungültige CT-ID: ${CTID}"
 
+  # ── Kollisionen automatisch auflösen ──
+  local UPDATE_MODE=0
   if pct status "$CTID" >/dev/null 2>&1; then
-    msg_warn "Container ${CTID} existiert bereits."
-    if pct exec "$CTID" -- test -f "/opt/${APP}/.app-marker" 2>/dev/null; then
-      msg_info "Bestehende ${APP_NAME}-Installation erkannt → UPDATE-Modus"
-      push_inner_script
-      run_inner
-      local ip
-      ip=$(pct exec "$CTID" -- hostname -I 2>/dev/null | awk '{print $1}')
-      verify_from_host "$ip"
-      summary "$ip"
-      return 0
+    if is_existing_app_container "$CTID"; then
+      msg_info "Bestehende ${APP_NAME}-Installation in CT ${CTID} erkannt → UPDATE-Modus"
+      UPDATE_MODE=1
+    else
+      local alternative
+      alternative=$(next_free_ctid $((CTID + 1)))
+      msg_warn "CT-ID ${CTID} ist bereits belegt → weiche automatisch auf ${alternative} aus."
+      CTID="$alternative"
     fi
-    msg_fatal "CT-ID ${CTID} wird von einem anderen Container verwendet. Bitte andere ID wählen."
   fi
 
+  # ── Installieren bzw. Updaten ──
   local ip
-  ip=$(create_container)
+  if [[ "$UPDATE_MODE" -eq 0 ]]; then
+    ip=$(create_container)
+  else
+    ip=$(pct exec "$CTID" -- hostname -I 2>/dev/null | awk '{print $1}')
+    [[ -n "$ip" ]] || { pct start "$CTID" >/dev/null 2>&1 || true; sleep 3;
+                        ip=$(pct exec "$CTID" -- hostname -I 2>/dev/null | awk '{print $1}'); }
+  fi
+
   push_inner_script
   run_inner
   ip=$(pct exec "$CTID" -- hostname -I 2>/dev/null | awk '{print $1}')
