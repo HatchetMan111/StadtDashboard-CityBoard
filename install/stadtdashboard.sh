@@ -19,6 +19,7 @@ VERSION="0.1.0"
 
 REPO_URL="${REPO_URL:-https://github.com/HatchetMan111/StadtDashboard-CityBoard.git}"
 RAW_BASE="${RAW_BASE:-https://raw.githubusercontent.com/HatchetMan111/StadtDashboard-CityBoard/main}"
+BRANCH="${BRANCH:-main}"
 
 PORT="${PORT:-8080}"            # Web-UI-Port im Container
 CTID="${CTID:-}"                # leer → interaktiv abfragen
@@ -59,6 +60,8 @@ on_error() {
 trap 'on_error $? $LINENO "$BASH_COMMAND"' ERR
 
 require_root() {
+  # SB_ALLOW_NON_ROOT=1 nur fuer Tests/Sandkasten – Produktion laeuft als root
+  [[ -n "${SB_ALLOW_NON_ROOT:-}" ]] && return 0
   [[ $EUID -eq 0 ]] || msg_fatal "Bitte als root ausführen (z. B. über 'su -')."
 }
 
@@ -154,14 +157,21 @@ push_inner_script() {
   if ! wget -qO "/tmp/${APP}-inner.sh" "${RAW_BASE}/install/${APP}-inner.sh"; then
     msg_fatal "Konnte ${RAW_BASE}/install/${APP}-inner.sh nicht laden."
   fi
+  # Integritaetspruefung: muss ein Shellscript sein (Schutz vor 404/Rate-Limit)
+  if ! head -n 1 "/tmp/${APP}-inner.sh" | grep -q '^#!'; then
+    echo "--- Anfang der heruntergeladenen Datei ---" >&2
+    head -n 5 "/tmp/${APP}-inner.sh" >&2
+    msg_fatal "Download ist kein gueltiges Script (GitHub-Fehlerseite?). Bitte erneut versuchen."
+  fi
   pct push "$CTID" "/tmp/${APP}-inner.sh" "$target" >/dev/null
   pct exec "$CTID" -- chmod +x "$target" >/dev/null
 }
 
 run_inner() {
   msg_info "Installation im Container wird ausgeführt (Log: /var/log/${APP}-install.log)"
-  pct exec "$CTID" -- bash -lc \
-    "bash /tmp/${APP}-inner.sh '${PORT}' '${REPO_URL}' '${BRANCH}'"
+  # Bewusst KEIN 'bash -l' (kein Profil-/Environment-Processing) und direkte
+  # Argumentuebergabe ohne verschachtelte Quotes – gleiche Methode wie in dsh.sh.
+  pct exec "$CTID" -- bash "/tmp/${APP}-inner.sh" "${PORT}" "${REPO_URL}" "${BRANCH}" 2>&1
 }
 
 verify_from_host() {
