@@ -64,7 +64,7 @@ echo -e "${GN}━━━━━━━━━━━━━━━━━━━━━━
 msg_info "System aktualisieren und Basis-Pakete installieren"
 apt-get update -qq
 apt-get install -y -qq \
-  curl wget git ca-certificates openssl \
+  curl wget git ca-certificates openssl tzdata \
   python3 python3-venv python3-pip >/dev/null
 msg_ok "Basis-Pakete installiert"
 
@@ -141,25 +141,60 @@ EOF
 fi
 systemctl daemon-reload
 systemctl enable "${APP}.service" >/dev/null 2>&1
+
+# Import-Sanity-Check: faengt Import-/Konfig-Fehler mit vollem Traceback ab,
+# BEVOR systemd den Service in eine Crash-Schleife schickt.
+msg_info "Prüfe Anwendungs-Import (Python)"
+cd "$APP_DIR"
+IMPORT_OUT="$("$APP_DIR/.venv/bin/python" -c "from app.main import app; print('OK')" 2>&1 || true)"
+if [ "$IMPORT_OUT" != "OK" ]; then
+  echo -e "${RD}── Python-Import fehlgeschlagen ──${CL}" >&2
+  echo "$IMPORT_OUT" >&2
+  msg_fatal "app.main konnte nicht importiert werden (siehe Traceback oben)."
+fi
+msg_ok "Anwendungs-Import OK"
+
 systemctl restart "${APP}.service"
 msg_ok "systemd-Service aktiviert (enable + restart)"
 
 # ───────────────────────── 6. Verifikation ──────────────────────────────────
+# Bewusst ohne '[[ ]] && break' – unter 'set -E' wuerde jeder nicht-active-Tick
+# den ERR-Trap ausloesen. Alle Pruefungen laufen ueber if/then mit || true.
 msg_info "Prüfe Service und Web UI"
-for _ in $(seq 1 20); do
-  [[ "$(systemctl is-active "${APP}")" == "active" ]] && break
+
+svc_state="unbekannt"
+for _ in $(seq 1 30); do
+  svc_state="$(systemctl is-active "${APP}" 2>/dev/null || true)"
+  if [ "$svc_state" = "active" ]; then break; fi
   sleep 1
 done
-[[ "$(systemctl is-active "${APP}")" == "active" ]] \
-  || msg_fatal "Service '${APP}' ist nicht active."
+
+if [ "$svc_state" != "active" ]; then
+  echo "" >&2
+  echo -e "${RD}── Diagnose: Service-Status ist '$svc_state' ──${CL}" >&2
+  systemctl status "${APP}" --no-pager -l 2>&1 | tail -n 30 >&2 || true
+  echo -e "${RD}── Journal der letzten 50 Zeilen ──${CL}" >&2
+  journalctl -u "${APP}" -n 50 --no-pager 2>&1 | tail -n 50 >&2 || true
+  msg_fatal "Service '${APP}' ist nicht active (Status: ${svc_state})."
+fi
+msg_ok "Service ist active"
 
 HEALTH=""
-for _ in $(seq 1 15); do
-  HEALTH="$(curl -sf --max-time 3 "http://127.0.0.1:${PORT}/healthz" || true)"
-  [[ -n "$HEALTH" ]] && break
+for _ in $(seq 1 20); do
+  HEALTH="$(curl -sf --max-time 3 "http://127.0.0.1:${PORT}/healthz" 2>/dev/null || true)"
+  if [ -n "$HEALTH" ]; then break; fi
   sleep 1
 done
-[[ -n "$HEALTH" ]] || msg_fatal "Health-Endpoint unter Port ${PORT} antwortet nicht."
+
+if [ -z "$HEALTH" ]; then
+  echo "" >&2
+  echo -e "${RD}── Diagnose: Health-Endpoint auf Port ${PORT} nicht erreichbar ──${CL}" >&2
+  systemctl is-active "${APP}" 2>&1 | tail -n 1 >&2 || true
+  ss -tlnp 2>/dev/null | grep ":${PORT}" >&2 || echo "  (Port ${PORT} lauscht nicht)" >&2
+  curl -sv --max-time 3 "http://127.0.0.1:${PORT}/healthz" 2>&1 | tail -n 8 >&2 || true
+  journalctl -u "${APP}" -n 20 --no-pager 2>&1 | tail -n 20 >&2 || true
+  msg_fatal "Health-Endpoint antwortet nicht."
+fi
 msg_ok "Health-Check OK: ${HEALTH}"
 
 IP="$(hostname -I 2>/dev/null | awk '{print $1}')"

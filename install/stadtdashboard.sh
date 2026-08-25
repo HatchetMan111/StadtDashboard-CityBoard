@@ -144,10 +144,12 @@ create_container() {
   msg_info "Warte auf Netzwerk im Container"
   for _ in $(seq 1 30); do
     ip=$(pct exec "$CTID" -- hostname -I 2>/dev/null | awk '{print $1}' || true)
-    [[ -n "$ip" ]] && break
+    if [ -n "$ip" ]; then break; fi
     sleep 1
   done
-  [[ -n "$ip" ]] || msg_fatal "Container hat keine IP erhalten (DHCP prüfen)."
+  if [ -z "$ip" ]; then
+    msg_fatal "Container hat keine IP erhalten (DHCP prüfen)."
+  fi
   echo "$ip"
 }
 
