@@ -134,6 +134,7 @@ Restart=always
 RestartSec=5
 Environment=PYTHONUNBUFFERED=1
 Environment=SB_DATA_DIR=${DATA_DIR}
+NoNewPrivileges=true
 
 [Install]
 WantedBy=multi-user.target
@@ -153,6 +154,11 @@ if [ "$IMPORT_OUT" != "OK" ]; then
   msg_fatal "app.main konnte nicht importiert werden (siehe Traceback oben)."
 fi
 msg_ok "Anwendungs-Import OK"
+
+# Ownership hart setzen (Import-Check lief als root; Datenpfad muss dem
+# Service-User gehoeren, sonst: sqlite 'unable to open database file')
+chown -R "${SERVICE_USER}:${SERVICE_USER}" "$DATA_DIR"
+chmod 750 "$DATA_DIR"
 
 systemctl restart "${APP}.service"
 msg_ok "systemd-Service aktiviert (enable + restart)"
@@ -191,8 +197,10 @@ if [ -z "$HEALTH" ]; then
   echo -e "${RD}── Diagnose: Health-Endpoint auf Port ${PORT} nicht erreichbar ──${CL}" >&2
   systemctl is-active "${APP}" 2>&1 | tail -n 1 >&2 || true
   ss -tlnp 2>/dev/null | grep ":${PORT}" >&2 || echo "  (Port ${PORT} lauscht nicht)" >&2
+  echo -e "${RD}── Datenverzeichnis ──${CL}" >&2
+  ls -la "$DATA_DIR" 2>&1 | tail -n 10 >&2 || true
   curl -sv --max-time 3 "http://127.0.0.1:${PORT}/healthz" 2>&1 | tail -n 8 >&2 || true
-  journalctl -u "${APP}" -n 20 --no-pager 2>&1 | tail -n 20 >&2 || true
+  journalctl -u "${APP}" -n 30 --no-pager 2>&1 | tail -n 30 >&2 || true
   msg_fatal "Health-Endpoint antwortet nicht."
 fi
 msg_ok "Health-Check OK: ${HEALTH}"

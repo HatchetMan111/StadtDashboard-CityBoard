@@ -14,12 +14,11 @@ RestartSec=5
 Environment=PYTHONUNBUFFERED=1
 Environment=SB_DATA_DIR=/opt/stadtdashboard/data
 
-# Harte Absicherung: nur Schreibzugriff auf das Datenverzeichnis
+# Bewusst KEIN ProtectSystem/ReadWritePaths/ProtectHome: Diese Mount-Namespace-
+# Härtung laeuft in unprivilegierten LXC-Containern nicht zuverlaessig (sqlite-
+# Fehler 'unable to open database file'). Schutz bleibt ueber dedizierten
+# System-Benutzer + NoNewPrivileges gegeben.
 NoNewPrivileges=true
-ProtectSystem=full
-ReadWritePaths=/opt/stadtdashboard/data
-ProtectHome=true
-PrivateTmp=true
 
 [Install]
 WantedBy=multi-user.target
