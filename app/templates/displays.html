@@ -2,11 +2,30 @@
 {% block title %}Displays · {{ app_name }}{% endblock %}
 {% block page %}displays{% endblock %}
 {% block content %}
-<h1>Displays</h1>
-<p class="subtitle">
-  Geräte verwalten. Am Gerät <code>http://SERVER:8080/display</code> öffnen – das Display
-  erscheint dann hier mit Status „wartet auf Kopplung“.
-</p>
+<h1>Displays veröffentlichen</h1>
+<p class="subtitle">Geräte koppeln, Layout zuweisen – Inhalte aktualisieren sich live.</p>
+
+<div class="panel" style="border-left:4px solid var(--accent)">
+  <h2>In 3 Schritten auf den Bildschirm</h2>
+  <ol style="padding-left:22px;line-height:1.9;font-size:14.5px">
+    <li><strong>Anzeige-URL am TV/Player öffnen</strong>
+      (Chrome/Firefox im Kiosk-Modus):<br>
+      <code id="display-url" style="font-size:15px"></code>
+      <button class="btn secondary small" id="copy-display-url" type="button"
+              style="margin-left:6px">URL kopieren</button>
+    </li>
+    <li><strong>Hier koppeln:</strong> Das Gerät erscheint unten als
+      „wartet auf Kopplung“ → Button <em>Koppeln</em> drücken.</li>
+    <li><strong>Inhalt zuweisen:</strong> Spalte „Layout / Zeitplan“ im Gerät setzen.
+      Fertig – jede Änderung an Layouts &amp; Inhalten erscheint sofort live
+      (WebSocket), auch offline läuft das Display mit dem letzten Stand weiter.</li>
+  </ol>
+  <p class="muted">Tipp: Layout-Inhalte (Medien, Bekanntmachungen …) bearbeitest du
+     unter <a href="/media">Medien</a>, <a href="/announcements">Bekanntmachungen</a>,
+     <a href="/events">Veranstaltungen</a> oder direkt im
+     <a href="/layouts">Layout-Editor mit Live-Vorschau</a>.</p>
+</div>
+
 <div class="panel">
   <table>
     <thead><tr><th>Status</th><th>Display</th><th>Layout / Zeitplan</th><th>Aktionen</th></tr></thead>

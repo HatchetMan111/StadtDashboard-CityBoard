@@ -252,6 +252,28 @@ def test_qr_widget_resolved_in_state(admin_client):
         "data:image/png;base64,")
 
 
+def test_layout_preview_state(admin_client):
+    """Live-Vorschau-Endpoint: rendert Layout-Zustand mit Admin-Cookie."""
+    layouts = admin_client.get("/api/admin/layouts").json()
+    layout = next(l for l in layouts if l["is_default"])
+    resp = admin_client.get(f"/api/admin/layouts/{layout['id']}/state")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["layout"]["id"] == layout["id"]
+    assert body["layout"]["orientation"] == layout["orientation"]
+    assert isinstance(body["layout"]["elements"], list)
+    assert body["city_name"]
+
+    # Ohne Admin-Session (eigener, cookiefreier Client): verweigert
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    with TestClient(app) as anon:
+        assert anon.get(
+            f"/api/admin/layouts/{layout['id']}/state").status_code == 401
+
+
 def test_layout_rejects_unknown_widget_type(admin_client):
     resp = admin_client.post("/api/admin/layouts", json={
         "name": "Kaputt", "orientation": "landscape",

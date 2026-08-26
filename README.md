@@ -46,14 +46,28 @@ Installationslog liegt im Container unter `/var/log/stadtdashboard-install.log`.
 
 | Schritt | Wo |
 |---|---|
-| Anmelden (`admin` / Initial-Passwort) | `http://LXC-IP:8080/` |
-| Passwort ändern (Pflicht-Hinweis erscheint im Dashboard) | Einstellungen → Passwort |
-| Stadtname, Logo, Ticker, Wetter pflegen | Einstellungen |
-| Bekanntmachung mit Priorität + Gültigkeit anlegen | Bekanntmachungen |
-| **Layout visuell bauen**: Widgets ziehen/skalieren, Medien zuweisen | Layouts |
-| Display koppeln: am Gerät `/display` öffnen → erscheint als „wartet“ → **Koppeln** | Displays |
+| Anmelden (`admin` / Initial-Passwort) | `http://LXC-IP:8080/` – Dashboard zeigt, was noch fehlt |
+| Passwort ändern (Warnbanner erscheint bis erledigt) | Einstellungen → Passwort |
+| Medien hochladen und **direkt einem Layout zuweisen** (＋ Galerie / Als Bild) | Medien |
+| **Layout visuell bauen** mit Drag & Drop + eingebetteter Live-Vorschau | Layouts |
+| **Veröffentlichen in 3 Schritten** (URL kopieren → koppeln → Layout zuweisen) | Displays |
 | Zeitgesteuerte Layouts (z. B. Nachtmodus 22–6 Uhr) | Zeitpläne |
-| Vollbild am TV: Browser im Kiosk-Modus auf `/display` | – |
+
+### Veröffentlichen (kurz)
+
+1. Auf dem TV/Player den Browser öffnen: `http://LXC-IP:8080/display`
+   (die genaue URL steht mit Kopier-Button unter **Displays**)
+2. Das Gerät erscheint unter **Displays** als „wartet auf Kopplung“ → **Koppeln**
+3. Im Gerät das **Layout oder einen Zeitplan** zuweisen – fertig.
+   Alle weiteren Änderungen (Medien, Bekanntmachungen, Layout) kommen
+   **sofort live** auf die Displays; bei Netzausfall läuft der letzte Stand weiter.
+
+### Vorschau ohne echtes Display
+
+Jedes gespeicherte Layout lässt sich sofort ansehen: Im **Layout-Editor**
+(Live-Vorschau-Panel bzw. „Vollbild-Vorschau“) oder aus der **Medien-Seite**
+über „▶ Vorschau“. Die Vorschau nutzt exakt dasselbe Rendering wie das echte
+Display – inklusive Wetter, Bekanntmachungen und Notfall-Banner.
 
 Das Display rendert **lokal im Browser**, cached den letzten Zustand in
 `localStorage` und läuft bei Netzausfall weiter (Uhr, Kalender, Bilder; Wetter wird

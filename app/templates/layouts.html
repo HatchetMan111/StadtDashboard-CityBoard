@@ -60,6 +60,23 @@
     </div>
 
     <div class="panel">
+      <details id="ed-live-details">
+        <summary style="cursor:pointer;font-weight:600">
+          ▶ Live-Vorschau (echtes Display-Rendering)
+        </summary>
+        <p class="muted" style="margin-top:8px">Zeigt dieses Layout mit echten Inhalten –
+           erst nach dem ersten Speichern verfügbar.</p>
+        <iframe id="ed-preview-frame" title="Live-Vorschau"
+                style="width:100%;aspect-ratio:16/9;border:0;border-radius:10px;background:#0b1220;display:none"></iframe>
+        <p style="margin-top:10px;display:flex;gap:8px;align-items:center">
+          <a class="btn secondary small hidden" id="ed-preview-full"
+             target="_blank" rel="noopener">Vollbild-Vorschau öffnen ↗</a>
+          <span class="muted">Die Vorschau aktualisiert sich alle 30 s selbst.</span>
+        </p>
+      </details>
+    </div>
+
+    <div class="panel">
       <details id="ed-json-details">
         <summary style="cursor:pointer;font-weight:600">JSON-Ansicht (für Experten)</summary>
         <textarea id="layout-json" rows="10"

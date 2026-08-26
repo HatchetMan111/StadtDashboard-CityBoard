@@ -129,15 +129,42 @@
     /* ── Dashboard ─────────────────────────────────────────────────────── */
     async pageDashboard() {
       try {
-        const [displays, anns, events, status] = await Promise.all([
-          this.api("/api/admin/displays"),
-          this.api("/api/admin/announcements"),
-          this.api("/api/admin/events"),
-          this.api("/api/admin/status"),
-        ]);
+        const [displays, anns, events, status, media, layouts, schedules] =
+          await Promise.all([
+            this.api("/api/admin/displays"),
+            this.api("/api/admin/announcements"),
+            this.api("/api/admin/events"),
+            this.api("/api/admin/status"),
+            this.api("/api/admin/media").catch(() => []),
+            this.api("/api/admin/layouts").catch(() => []),
+            this.api("/api/admin/schedules").catch(() => []),
+          ]);
         if (status.initial_password_active) {
           document.getElementById("pw-banner").classList.remove("hidden");
         }
+
+        /* Einrichtungs-Checkliste */
+        const mediaAssigned = layouts.some((l) => (l.elements || []).some((e) =>
+          (e.type === "gallery" && (e.config?.media_ids || []).length) ||
+          (e.type === "image" && e.config?.media_id)));
+        const paired = displays.some((d) => d.approved);
+        const steps = [
+          { done: media.length > 0, label: "Medien hochladen",
+            href: "/media", cta: "Medien" },
+          { done: mediaAssigned, label: "Layout mit Medien füllen",
+            href: "/layouts", cta: "Layout-Editor" },
+          { done: paired, label: "Display koppeln & veröffentlichen",
+            href: "/displays", cta: "Displays" },
+          { done: schedules.length > 0,
+            label: "Optional: Zeitplan für Tageszeiten",
+            href: "/schedules", cta: "Zeitpläne" },
+        ];
+        document.getElementById("setup-list").innerHTML = steps.map((s) => `
+          <li class="${s.done ? "done" : ""}">
+            <span class="lbl">${this.esc(s.label)}</span>
+            ${s.done ? "" :
+              ` – <a href="${s.href}">jetzt in ${s.cta} →</a>`}
+          </li>`).join("");
         const online = displays.filter(d => d.online && d.approved).length;
         const pending = displays.filter(d => !d.approved).length;
         const activeAnns = anns.filter(a => a.currently_valid);
@@ -179,6 +206,18 @@
 
     /* ── Displays ──────────────────────────────────────────────────────── */
     async pageDisplays() {
+      const displayUrl = `${location.protocol}//${location.host}/display`;
+      document.getElementById("display-url").textContent = displayUrl;
+      document.getElementById("copy-display-url").addEventListener("click",
+        async () => {
+          try {
+            await navigator.clipboard.writeText(displayUrl);
+            this.toast("Anzeige-URL kopiert");
+          } catch {
+            this.toast("Kopieren nicht möglich – URL manuell markieren", true);
+          }
+        });
+
       let layouts = [], schedules = [];
       const reload = async () => {
         [layouts, schedules] = await Promise.all([
@@ -399,47 +438,110 @@
     async pageMedia() {
       const grid = document.getElementById("media-grid");
       const input = document.getElementById("media-input");
+      const layoutSel = document.getElementById("assign-layout");
+      let layouts = [];
+      const lastAssigned = {}; // mediaId -> layoutId (für Vorschau-Link)
 
-      const reload = async () => {
-        const items = await this.api("/api/admin/media");
-        grid.innerHTML = items.map(m => `
+      function renderLayoutOptions() {
+        if (!layouts.length) {
+          layoutSel.innerHTML = "<option value=''>– noch keine Layouts –</option>";
+          return;
+        }
+        layoutSel.innerHTML = layouts.map((l) =>
+          `<option value="${l.id}">${SB.esc(l.name)}${l.is_default ? " (Standard)" : ""}</option>`).join("");
+      }
+
+      /* Medium in Layout-Widget einfügen (Galerie-Liste bzw. Bild-Widget) */
+      async function addToLayout(layoutId, mediaId, mode) {
+        const all = await SB.api("/api/admin/layouts");
+        const l = all.find((x) => x.id === Number(layoutId));
+        if (!l) throw new Error("Layout nicht gefunden");
+        const els = JSON.parse(JSON.stringify(l.elements || []));
+        let target = els.find((e) => e.type === mode);
+        if (!target) {
+          target = mode === "gallery"
+            ? { type: "gallery", x: 36, y: 17, w: 38, h: 62,
+                config: { media_ids: [], seconds: 8 } }
+            : { type: "image", x: 36, y: 17, w: 38, h: 50,
+                config: { media_id: null } };
+          els.push(target);
+        }
+        if (mode === "gallery") {
+          const ids = target.config.media_ids || (target.config.media_ids = []);
+          if (!ids.includes(mediaId)) ids.push(mediaId);
+        } else {
+          target.config.media_id = mediaId;
+        }
+        await SB.api(`/api/admin/layouts/${l.id}`, {
+          method: "PATCH",
+          body: { name: l.name, orientation: l.orientation,
+            elements: els, is_default: l.is_default },
+        });
+        return l;
+      }
+
+      async function reload() {
+        const items = await SB.api("/api/admin/media");
+        grid.innerHTML = items.map((m) => `
           <div class="media-item" data-id="${m.id}">
             ${m.kind === "image"
               ? `<img src="${m.thumb_url || m.url}" alt="" loading="lazy">`
               : `<video src="${m.url}" preload="metadata"></video>`}
-            <div class="meta"><strong>${this.esc(m.title)}</strong>
-              <div class="muted">${this.fmtSize(m.size)} · ${this.esc(m.mime)}</div></div>
+            <div class="meta"><strong>${SB.esc(m.title)}</strong>
+              <div class="muted">${SB.fmtSize(m.size)} · ${SB.esc(m.mime)}</div></div>
             <div class="actions">
+              <button class="btn secondary small" data-addgal="${m.id}">＋ Galerie</button>
+              <button class="btn secondary small" data-addimg="${m.id}">Als Bild</button>
+              ${lastAssigned[m.id]
+                ? `<a class="btn small" target="_blank" rel="noopener"
+                     href="/display?preview=${lastAssigned[m.id]}">▶ Vorschau</a>`
+                : ""}
               <button class="btn danger small" data-del="${m.id}">Löschen</button>
             </div>
           </div>`).join("") ||
           `<p class="muted">Noch keine Medien hochgeladen.</p>`;
-      };
+      }
 
-      document.getElementById("media-upload").addEventListener("submit", async e => {
+      grid.addEventListener("click", async (e) => {
+        const gal = e.target.closest("[data-addgal]");
+        const img = e.target.closest("[data-addimg]");
+        const del = e.target.closest("[data-del]");
+        try {
+          if (gal || img) {
+            const item = (gal || img).closest(".media-item");
+            const mediaId = Number(item.dataset.id);
+            const layoutId = layoutSel.value;
+            if (!layoutId) return SB.toast("Erst ein Layout oben wählen", true);
+            const l = await addToLayout(Number(layoutId), mediaId,
+              gal ? "gallery" : "image");
+            lastAssigned[mediaId] = l.id;
+            SB.toast(`Zu „${l.name}" hinzugefügt – Vorschau unten`);
+            await reload();
+          } else if (del) {
+            if (!confirm("Medium wirklich löschen?")) return;
+            await SB.api(`/api/admin/media/${del.dataset.del}`, { method: "DELETE" });
+            delete lastAssigned[del.dataset.del];
+            await reload();
+          }
+        } catch (err) { SB.toast(err.message, true); }
+      });
+
+      document.getElementById("media-upload").addEventListener("submit", async (e) => {
         e.preventDefault();
         if (!input.files.length) return this.toast("Keine Datei gewählt", true);
         const fd = new FormData();
         fd.append("file", input.files[0]);
         try {
           await this.api("/api/admin/media", { method: "POST", body: fd });
-          this.toast("Upload erfolgreich");
+          this.toast("Upload erfolgreich – jetzt unten einem Layout zuweisen");
           input.value = "";
           await reload();
         } catch (err) { this.toast(err.message, true); }
       });
 
-      grid.addEventListener("click", async e => {
-        const del = e.target.closest("[data-del]");
-        if (!del) return;
-        if (!confirm("Medium wirklich löschen?")) return;
-        try {
-          await this.api(`/api/admin/media/${del.dataset.del}`, { method: "DELETE" });
-          await reload();
-        } catch (err) { this.toast(err.message, true); }
-      });
-
-      await reload().catch(err => this.toast(err.message, true));
+      layouts = await SB.api("/api/admin/layouts").catch(() => []);
+      renderLayoutOptions();
+      await reload().catch((err) => this.toast(err.message, true));
     },
 
     /* ── Layouts: Drag-&-Drop-Editor ───────────────────────────────────── */
@@ -743,7 +845,25 @@
         S.sel = -1;
         $("layout-name").value = l.name;
         $("layout-orientation").value = l.orientation;
+        updatePreviewLinks();
         renderList(); draw(); buildProps();
+      }
+
+      function updatePreviewLinks() {
+        const frame = $("ed-preview-frame");
+        const full = $("ed-preview-full");
+        const hint = frame.previousElementSibling;
+        if (!S.id) {
+          frame.style.display = "none"; full.classList.add("hidden");
+          if (hint) hint.style.display = "";
+          return;
+        }
+        const url = `/display?preview=${S.id}`;
+        frame.src = url;
+        frame.style.display = "";
+        if (hint) hint.style.display = "none";
+        full.href = url;
+        full.classList.remove("hidden");
       }
 
       $("layout-list").addEventListener("click", async (e) => {
@@ -773,6 +893,7 @@
       $("layout-new").addEventListener("click", () => {
         S.id = null; S.els = []; S.sel = -1;
         $("layout-name").value = "Neues Layout";
+        updatePreviewLinks();
         renderList(); draw(); buildProps();
       });
 
@@ -789,6 +910,9 @@
             S.id = res.id;
           }
           SB.toast("Layout gespeichert");
+          updatePreviewLinks();   // iframe auf gespeicherte Version reloaden
+          const frame = $("ed-preview-frame");
+          if (frame && S.id) { frame.src = `/display?preview=${S.id}`; }
           await reloadAll();
         } catch (err) { SB.toast(err.message, true); }
       });

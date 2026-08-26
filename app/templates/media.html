@@ -3,7 +3,12 @@
 {% block page %}media{% endblock %}
 {% block content %}
 <h1>Medien</h1>
-<p class="subtitle">Bilder und Videos für die Displays. Alles bleibt lokal gespeichert.</p>
+<p class="subtitle">
+  Bilder und Videos für die Displays – alles bleibt lokal gespeichert.
+  Unten bei jedem Medium: <strong>Layout wählen</strong> und direkt
+  <strong>„＋ Galerie“</strong> oder <strong>„Als Bild“</strong> zuweisen,
+  dann per <strong>▶ Vorschau</strong> ansehen, wie es auf dem Display aussieht.
+</p>
 
 <div class="panel">
   <form id="media-upload" class="inline">
@@ -11,6 +16,17 @@
       <input type="file" id="media-input" accept=".jpg,.jpeg,.png,.gif,.webp,.svg,.mp4,.webm"></span>
     <button class="btn" type="submit">Hochladen</button>
   </form>
+</div>
+
+<div class="panel">
+  <h2>Zuweisen an Layout</h2>
+  <div class="inline" style="align-items:center">
+    <span class="field"><label>Layout</label>
+      <select id="assign-layout"></select></span>
+    <span class="muted">Gilt für alle Zuweisungen unten –
+      „＋ Galerie“ hängt das Medium an die erste Galerie des Layouts (legt eine an,
+      falls keine existiert), „Als Bild“ setzt es in das erste Bild-Widget.</span>
+  </div>
 </div>
 
 <div class="media-grid" id="media-grid"></div>

@@ -45,8 +45,40 @@
     });
   }
 
+  /* ── Vorschau-Modus (?preview=LAYOUT_ID) ─────────────────────────────
+     Rendert exakt wie ein echtes Display, aber: keine Registrierung,
+     kein Pairing, kein localStorage, kein WebSocket – nur Lesen über
+     die angemeldete Admin-Session. */
+  async function runPreview(layoutId) {
+    pairingEl.classList.add("hidden");
+    document.body.classList.add("previewing");
+    const bar = document.getElementById("preview-bar");
+    if (bar) bar.classList.remove("hidden");
+
+    const tick = async () => {
+      try {
+        const resp = await fetch(
+          `/api/admin/layouts/${encodeURIComponent(layoutId)}/state`);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const state = await resp.json();
+        staleBadge.classList.add("hidden");
+        render(state);
+      } catch {
+        staleBadge.textContent = "Vorschau nicht verfügbar – im Admin angemeldet?";
+        staleBadge.classList.remove("hidden");
+      }
+    };
+    await tick();
+    setInterval(tick, 30000);
+  }
+
   /* ── Boot ─────────────────────────────────────────────────────────── */
   async function boot() {
+    const previewId = new URLSearchParams(location.search).get("preview");
+    if (previewId) {
+      await runPreview(previewId);
+      return;
+    }
     device = loadDevice();
     if (!device) await register();
     await waitUntilApproved();
