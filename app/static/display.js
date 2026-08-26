@@ -316,6 +316,8 @@
         const track = document.createElement("div");
         track.className = "track";
         track.textContent = state.ticker_text + "   ●   ";
+        track.style.animationDuration =
+          `${Math.max(10, Number(state.ticker_speed) || 30)}s`;
         w.appendChild(track);
         return w;
       }

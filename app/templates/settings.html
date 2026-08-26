@@ -4,6 +4,7 @@
 {% block content %}
 <h1>Einstellungen</h1>
 <p class="subtitle">Stadt, Wetter, Datenschutz und Zugang.</p>
+<span id="me-user" class="hidden">{{ user }}</span>
 
 <form id="settings-form">
   <div class="grid-2">
@@ -15,6 +16,8 @@
         <input name="city_website"></div>
       <div class="field mt"><label>Ticker-Text (leer = aus)</label>
         <input name="ticker_text"></div>
+      <div class="field mt"><label>Ticker-Geschwindigkeit (Sekunden pro Durchlauf)</label>
+        <input name="ticker_speed_seconds" type="number" min="10" max="300"></div>
       <div class="field mt"><label>Wechseldauer Szenen/Bilder (Sekunden, min. 3)</label>
         <input name="scene_seconds" type="number" min="3" max="120"></div>
       <div class="field mt"><label>Stadtlogo</label>
@@ -62,24 +65,61 @@
 
 <div class="grid-2 mt">
   <div class="panel">
-    <h2>Passwort ändern</h2>
-    <form id="pw-form" class="inline">
-      <span class="field"><label>Aktuelles Passwort</label>
-        <input type="password" name="old" required autocomplete="current-password"></span>
-      <span class="field"><label>Neues Passwort (min. 8 Zeichen)</label>
-        <input type="password" name="new" minlength="8" required
+    <h2>Benachrichtigungen (Offline-Wächter)</h2>
+    <label class="checkbox">
+      <input type="checkbox" name="notify_enabled">
+      Warnen, wenn ein Display länger offline ist
+    </label>
+    <div class="field mt"><label>Schwelle in Minuten</label>
+      <input name="offline_threshold_minutes" type="number" min="2" max="1440"></div>
+    <div class="field mt"><label>Webhook-URL (JSON {"text": …} – z. B. ntfy/Slack/Discord)</label>
+      <input name="notify_webhook_url" placeholder="https://ntfy.local/themenstadt"></div>
+    <h3 style="margin-top:14px;font-size:13px;color:var(--muted)">E-Mail (SMTP)</h3>
+    <div class="inline mt">
+      <span class="field" style="flex:1"><label>SMTP-Host</label><input name="smtp_host"></span>
+      <span class="field"><label>Port</label><input name="smtp_port" type="number" min="1"></span>
+    </div>
+    <div class="inline mt">
+      <span class="field" style="flex:1"><label>Benutzer</label><input name="smtp_user" autocomplete="off"></span>
+      <span class="field" style="flex:1"><label>Passwort</label>
+        <input type="password" name="smtp_pass" autocomplete="new-password"></span>
+    </div>
+    <div class="inline mt">
+      <span class="field" style="flex:1"><label>Absender (From)</label><input name="smtp_from"></span>
+      <span class="field" style="flex:1"><label>Empfänger (To)</label><input name="notify_email_to"></span>
+    </div>
+    <p class="muted mt">Wird pro Offline-Episode maximal einmal benachrichtigt;
+       wieder online gemeldete Displays werden neu „scharf gestellt“.</p>
+  </div>
+
+  <div class="panel">
+    <h2>Benutzer &amp; Rollen</h2>
+    <p class="muted">Administratoren dürfen alles; Redakteure nur Inhalte
+       (Bekanntmachungen, Veranstaltungen, Medien inkl. Zuweisung).</p>
+    <table id="users-table" style="margin-top:8px"><tbody></tbody></table>
+    <form id="user-form" class="inline mt" onsubmit="return false">
+      <span class="field"><label>Benutzername</label>
+        <input name="username" minlength="3" required></span>
+      <span class="field"><label>Passwort (min. 8)</label>
+        <input name="password" type="password" minlength="8" required
                autocomplete="new-password"></span>
-      <button class="btn" type="submit">Ändern</button>
+      <span class="field"><label>Rolle</label>
+        <select name="role">
+          <option value="editor">Redakteur</option>
+          <option value="admin">Administrator</option>
+        </select></span>
+      <button class="btn small" type="button" id="user-create">Anlegen</button>
     </form>
   </div>
-  <div class="panel">
-    <h2>Backup</h2>
-    <p class="muted">Enthält Datenbank, Einstellungen und alle Medien.</p>
-    <a class="btn mt" href="/api/admin/backup" download>Backup herunterladen</a>
-    <p class="muted mt">Restore: Service stoppen → Backup entpacken und
-      <code>stadtdashboard.db</code>, <code>settings.json</code> sowie
-      <code>uploads/</code> nach <code>/opt/stadtdashboard/data/</code> kopieren →
-      Service starten.</p>
-  </div>
+</div>
+
+<div class="panel mt">
+  <h2>Backup</h2>
+  <p class="muted">Enthält Datenbank, Einstellungen und alle Medien.</p>
+  <a class="btn mt" href="/api/admin/backup" download>Backup herunterladen</a>
+  <p class="muted mt">Restore: Service stoppen → Backup entpacken und
+    <code>stadtdashboard.db</code>, <code>settings.json</code> sowie
+    <code>uploads/</code> nach <code>/opt/stadtdashboard/data/</code> kopieren →
+    Service starten.</p>
 </div>
 {% endblock %}

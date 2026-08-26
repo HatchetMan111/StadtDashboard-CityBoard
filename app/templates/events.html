@@ -6,6 +6,19 @@
 <p class="subtitle">Lokaler Veranstaltungskalender für die Displays.</p>
 
 <div class="panel">
+  <h2>Aus Kalender importieren (iCal/ICS)</h2>
+  <form id="ics-form" class="inline" onsubmit="return false">
+    <span class="field"><label>ICS-Datei</label>
+      <input type="file" id="ics-file" accept=".ics,text/calendar"></span>
+    <span class="field" style="flex:1"><label>… oder URL (benötigt aktivierten externen Zugriff)</label>
+      <input id="ics-url" placeholder="https://www.stadt.de/veranstaltungen.ics"></span>
+    <button class="btn" type="button" id="ics-import">Importieren</button>
+  </form>
+  <p class="muted mt" id="ics-result">Duplikate (gleicher Titel + Start) werden übersprungen;
+     vergangene Termine ignoriert.</p>
+</div>
+
+<div class="panel">
   <h2 id="ev-form-title">Neu anlegen</h2>
   <form id="ev-form" class="inline">
     <span class="field" style="flex:2;min-width:200px"><label>Titel *</label>

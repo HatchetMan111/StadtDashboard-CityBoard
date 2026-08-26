@@ -153,6 +153,7 @@ def build_state(db: Session, display: Display | None = None) -> dict:
         "server_time": now.isoformat(timespec="seconds"),
         "city_name": get_setting(db, "city_name", ""),
         "ticker_text": get_setting(db, "ticker_text", ""),
+        "ticker_speed": _int_setting(db, "ticker_speed_seconds", 30),
         "scene_seconds": _int_setting(db, "scene_seconds", 12),
         "weather": weather_svc.current_weather(db),
         "announcements": [

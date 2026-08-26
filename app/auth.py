@@ -79,6 +79,13 @@ def require_admin(request: Request, db: Session = Depends(get_db)) -> AdminUser:
     return user
 
 
+def require_full_admin(user: AdminUser = Depends(require_admin)) -> AdminUser:
+    """Nur Rolle 'admin' – Redakteure bekommen Geräte/System nicht zu sehen."""
+    if getattr(user, "role", "admin") != "admin":
+        raise HTTPException(status_code=403, detail="Nur Administratoren")
+    return user
+
+
 def optional_admin(request: Request, db: Session = Depends(get_db)) -> AdminUser | None:
     try:
         return require_admin(request, db)

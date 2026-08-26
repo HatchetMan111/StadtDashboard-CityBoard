@@ -8,7 +8,11 @@ installierbar als Proxmox-LXC mit einem Einzeiler.
 - **Display-Frontend** – schlanke Vollbild-Ansicht für TV/Monitor/Signage-Player
 - **API/Backend** – FastAPI + SQLite, REST + WebSocket, keine externen Cloud-Dienste
 - **Drag-&-Drop-Layout-Editor** – Widgets auf die Fläche ziehen, skalieren,
-  Medien per Klick zuweisen (Galerie/Bild/QR)
+  Medien per Klick zuweisen (Galerie/Bild/QR); Snap-Raster, Führungslinien,
+  Undo (Strg+Z), Ebenen
+- **Rollen** – Administrator & Redakteur (nur Inhalte)
+- **Offline-Wächter** – Webhook/E-Mail, wenn ein Display zu lange schweigt
+- **iCal/ICS-Import** – Veranstaltungskalender lokal übernehmen
 
 ---
 
@@ -132,9 +136,9 @@ Details: [docs/ARCHITEKTUR.md](docs/ARCHITEKTUR.md)
 ## ✅ Verifikation
 
 ```
-pytest .................. 20 passed (inkl. Passwort-Lifecycle, Pairing, Scheduler)
+pytest .................. 32 passed (Rate-Limit, Rollen-Matrix, ICS, Assign,
+                          Duplizieren, Notifier, Scheduler, Backup …)
 Installer-E2E ........... 5/5 (Stub-Proxmox: Create/Kollision/Update/404)
-uvicorn Boot ............ healthz/login/display/layouts 200 · Static 200
 bash -n + shellcheck .... outer/inner/e2e fehlerfrei
 ```
 

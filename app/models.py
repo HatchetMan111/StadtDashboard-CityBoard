@@ -14,6 +14,7 @@ class AdminUser(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     username: Mapped[str] = mapped_column(String(64), unique=True)
     password_hash: Mapped[str] = mapped_column(String(256))
+    role: Mapped[str] = mapped_column(String(20), default="admin")  # admin|editor
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 

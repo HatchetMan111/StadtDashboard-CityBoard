@@ -1,4 +1,5 @@
-"""Admin-REST-API: Auth, Displays, Inhalte, Layouts, Zeitplaene, Einstellungen, Backup."""
+"""Admin-REST-API: Auth, Rollen, Displays, Inhalte, Layouts, Zeitplaene,
+Einstellungen, Backup, ICS-Import."""
 from __future__ import annotations
 
 import io
@@ -6,11 +7,14 @@ import json
 import logging
 import sqlite3
 import tempfile
+import time as _time
 import zipfile
-from datetime import datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+import httpx
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
@@ -22,6 +26,7 @@ from ..auth import (
     create_session,
     hash_password,
     require_admin,
+    require_full_admin,
     verify_password,
 )
 from ..database import get_db
@@ -37,11 +42,34 @@ from ..models import (
 )
 from ..seed import DEFAULT_SETTINGS, get_setting, set_setting
 from ..services import weather as weather_svc
-from ..services.state import build_state, now_local, resolve_elements
+from ..services.state import (
+    _rule_matches,
+    build_state,
+    now_local,
+    pick_layout,
+    resolve_elements,
+)
 from ..ws import manager
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 log = logging.getLogger("stadtdashboard.admin")
+
+# ── Login-Rate-Limit (pro Host+Benutzer, gleitendes Fenster) ───────────────
+RATE_LIMIT_MAX = 5
+RATE_LIMIT_WINDOW = 60.0
+_login_failures: dict[str, list[float]] = {}
+
+
+def _rate_limited(key: str) -> tuple[bool, int]:
+    now = _time.monotonic()
+    attempts = [t for t in _login_failures.get(key, []) if now - t < RATE_LIMIT_WINDOW]
+    _login_failures[key] = attempts
+    return len(attempts) >= RATE_LIMIT_MAX, RATE_LIMIT_MAX - len(attempts)
+
+
+def reset_rate_limit() -> None:
+    """Für Tests/Verwaltung: Zähler zurücksetzen."""
+    _login_failures.clear()
 
 
 async def notify_displays() -> None:
@@ -60,11 +88,25 @@ class PasswordIn(BaseModel):
 
 
 @router.post("/login")
-def login(body: LoginIn, db: Session = Depends(get_db)) -> Response:
+def login(body: LoginIn, request: Request, db: Session = Depends(get_db)) -> Response:
+    host = request.client.host if request.client else "local"
+    key = f"{host}|{body.username}"
+    limited, remaining = _rate_limited(key)
+    if limited:
+        log.warning("login.rate_limited key=%s", key)
+        raise HTTPException(
+            status_code=429,
+            detail="Zu viele Fehlversuche – bitte in einer Minute erneut versuchen.",
+        )
     user = db.query(AdminUser).filter_by(username=body.username).first()
     if not user or not verify_password(body.password, user.password_hash):
-        log.warning("login.failed username=%s", body.username)
-        raise HTTPException(status_code=401, detail="Benutzer oder Passwort falsch")
+        _login_failures.setdefault(key, []).append(_time.monotonic())
+        left = RATE_LIMIT_MAX - len(_login_failures[key])
+        log.warning("login.failed username=%s verbleibende_versuche=%s",
+                    body.username, max(0, left))
+        raise HTTPException(status_code=401,
+                            detail=f"Benutzer oder Passwort falsch ({max(0, left)} Versuche übrig)")
+    _login_failures.pop(key, None)  # erfolgreicher Login resettet den Zähler
     resp = Response(content='{"ok": true}', media_type="application/json")
     resp.set_cookie(
         SESSION_COOKIE,
@@ -74,6 +116,55 @@ def login(body: LoginIn, db: Session = Depends(get_db)) -> Response:
         samesite="lax",
     )
     return resp
+
+
+# ── Benutzerverwaltung (nur volle Admins) ──────────────────────────────────
+class UserIn(BaseModel):
+    username: str = Field(min_length=3, max_length=64)
+    password: str = Field(min_length=8)
+    role: str = Field(pattern="^(admin|editor)$")
+
+
+@router.get("/users")
+def list_users(db: Session = Depends(get_db), _u=Depends(require_full_admin)) -> list[dict]:
+    return [
+        {"id": u.id, "username": u.username, "role": getattr(u, "role", "admin")}
+        for u in db.query(AdminUser).order_by(AdminUser.id.asc()).all()
+    ]
+
+
+@router.post("/users")
+def create_user(
+    body: UserIn, db: Session = Depends(get_db), _u=Depends(require_full_admin),
+) -> dict:
+    if db.query(AdminUser).filter_by(username=body.username).first():
+        raise HTTPException(status_code=409, detail="Benutzer existiert bereits")
+    u = AdminUser(username=body.username, password_hash=hash_password(body.password),
+                  role=body.role)
+    db.add(u)
+    db.commit()
+    log.info("user.created username=%s role=%s", u.username, u.role)
+    return {"id": u.id}
+
+
+@router.delete("/users/{user_id}")
+def delete_user(
+    user_id: int, request_user: AdminUser = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> dict:
+    if getattr(request_user, "role", "admin") != "admin":
+        raise HTTPException(status_code=403, detail="Nur Administratoren")
+    target = db.get(AdminUser, user_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="Nicht gefunden")
+    if target.id == request_user.id:
+        raise HTTPException(status_code=400, detail="Man kann sich nicht selbst löschen")
+    if getattr(target, "role", "admin") == "admin" and \
+            db.query(AdminUser).filter(AdminUser.role == "admin").count() <= 1:
+        raise HTTPException(status_code=400, detail="Letzter Administrator kann nicht gelöscht werden")
+    db.delete(target)
+    db.commit()
+    return {"ok": True}
 
 
 @router.post("/logout")
@@ -133,6 +224,7 @@ def _display_online(display: Display) -> bool:
 def list_displays(db: Session = Depends(get_db), _u=Depends(require_admin)) -> list[dict]:
     out = []
     for d in db.query(Display).order_by(Display.created_at.asc()).all():
+        eff = pick_layout(db, d)
         out.append({
             "id": d.id, "name": d.name, "location": d.location,
             "resolution": d.resolution, "orientation": d.orientation,
@@ -140,6 +232,7 @@ def list_displays(db: Session = Depends(get_db), _u=Depends(require_admin)) -> l
             "online": _display_online(d),
             "last_seen": d.last_seen.isoformat(timespec="seconds") if d.last_seen else None,
             "layout_id": d.layout_id, "schedule_id": d.schedule_id,
+            "effective_layout": {"id": eff.id, "name": eff.name} if eff else None,
         })
     return out
 
@@ -156,7 +249,7 @@ class DisplayPatch(BaseModel):
 @router.patch("/displays/{device_id}")
 async def patch_display(
     device_id: str, body: DisplayPatch,
-    db: Session = Depends(get_db), _u=Depends(require_admin),
+    db: Session = Depends(get_db), _u=Depends(require_full_admin),
 ) -> dict:
     d = db.get(Display, device_id)
     if not d:
@@ -170,7 +263,7 @@ async def patch_display(
 
 @router.post("/displays/{device_id}/approve")
 def approve_display(
-    device_id: str, db: Session = Depends(get_db), _u=Depends(require_admin),
+    device_id: str, db: Session = Depends(get_db), _u=Depends(require_full_admin),
 ) -> dict:
     d = db.get(Display, device_id)
     if not d:
@@ -183,7 +276,7 @@ def approve_display(
 
 @router.post("/displays/{device_id}/revoke")
 def revoke_display(
-    device_id: str, db: Session = Depends(get_db), _u=Depends(require_admin),
+    device_id: str, db: Session = Depends(get_db), _u=Depends(require_full_admin),
 ) -> dict:
     """Token zuruecksetzen → Display muss neu gekoppelt werden."""
     import secrets as _secrets
@@ -200,7 +293,7 @@ def revoke_display(
 
 @router.delete("/displays/{device_id}")
 def delete_display(
-    device_id: str, db: Session = Depends(get_db), _u=Depends(require_admin),
+    device_id: str, db: Session = Depends(get_db), _u=Depends(require_full_admin),
 ) -> dict:
     d = db.get(Display, device_id)
     if not d:
@@ -348,6 +441,109 @@ async def delete_event(
     return {"ok": True}
 
 
+# ── Veranstaltungs-Import (iCal/ICS, lokal geparsed) ───────────────────────
+class IcsImportIn(BaseModel):
+    url: str | None = None
+    ics_text: str | None = None
+
+
+MAX_IMPORT_EVENTS = 500
+
+
+@router.post("/events/import")
+async def import_events(
+    body: IcsImportIn, db: Session = Depends(get_db), _u=Depends(require_admin),
+) -> dict:
+    """Importiert VEVENTs aus einer ICS-Datei (Text/Feld) oder URL.
+
+    Datenschutz: URL-Import ist ein externer Abruf und nur bei aktiviertem
+    'allow_external' erlaubt. Datei-Upload funktioniert immer lokal.
+    Duplikate (gleicher Titel + gleicher Start) werden übersprungen.
+    """
+    text = (body.ics_text or "").strip()
+    if not text and body.url:
+        if get_setting(db, "allow_external", "false") != "true":
+            raise HTTPException(
+                status_code=400,
+                detail="URL-Import benötigt aktivierten externen Zugriff "
+                       "(Einstellungen → Datenschutz). ICS-Datei-Upload geht immer.",
+            )
+        try:
+            async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as c:
+                resp = await c.get(body.url)
+                resp.raise_for_status()
+                text = resp.text
+        except httpx.HTTPError as exc:
+            raise HTTPException(status_code=400,
+                                detail=f"Kalender-URL nicht abrufbar: {exc}")
+    if not text:
+        raise HTTPException(status_code=400,
+                            detail="Weder ICS-Text noch URL übergeben.")
+
+    from icalendar import Calendar
+
+    try:
+        cal = Calendar.from_ical(text)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400,
+                            detail=f"ICS konnte nicht gelesen werden: {exc}")
+
+    tz = ZoneInfo(config.TIMEZONE)
+    now = now_local()
+    imported = dupes = past = skipped = 0
+
+    for comp in cal.walk("VEVENT"):
+        title = str(comp.get("SUMMARY", "")).strip()
+        dtstart = comp.get("DTSTART")
+        if not title or dtstart is None or not getattr(dtstart.dt, "year", None):
+            skipped += 1
+            continue
+        start = dtstart.dt
+        if isinstance(start, date) and not isinstance(start, datetime):
+            start = datetime.combine(start, time.min)
+        if start.tzinfo is not None:
+            start = start.astimezone(tz).replace(tzinfo=None)
+
+        end = None
+        dtend = comp.get("DTEND")
+        if dtend is not None and getattr(dtend.dt, "year", None):
+            end = dtend.dt
+            if isinstance(end, date) and not isinstance(end, datetime):
+                end = datetime.combine(end, time.min)
+            if getattr(end, "tzinfo", None) is not None:
+                end = end.astimezone(tz).replace(tzinfo=None)
+
+        if start < now - timedelta(hours=2):
+            past += 1
+            continue
+
+        exists = (
+            db.query(Event)
+            .filter(Event.title == title[:200], Event.start_at == start)
+            .first()
+        )
+        if exists:
+            dupes += 1
+            continue
+        if imported + db.query(Event).count() >= MAX_IMPORT_EVENTS:
+            break
+
+        db.add(Event(
+            title=title[:200],
+            description=str(comp.get("DESCRIPTION", ""))[:2000],
+            start_at=start, end_at=end,
+            location=str(comp.get("LOCATION", ""))[:200],
+        ))
+        imported += 1
+
+    db.commit()
+    await notify_displays()
+    log.info("events.imported imported=%s dupes=%s past=%s invalid=%s",
+             imported, dupes, past, skipped)
+    return {"imported": imported, "duplicates": dupes, "past": past,
+            "invalid": skipped}
+
+
 # ── Medien ──────────────────────────────────────────────────────────────────
 @router.get("/media")
 def list_media(db: Session = Depends(get_db), _u=Depends(require_admin)) -> list[dict]:
@@ -444,6 +640,60 @@ async def delete_media(
     return {"ok": True}
 
 
+# ── Medium einem Layout zuweisen (auch für Redakteure) ─────────────────────
+class AssignIn(BaseModel):
+    layout_id: int
+    mode: str = Field(pattern="^(gallery|image)$")
+
+    @field_validator("mode")
+    @classmethod
+    def known_mode(cls, v: str) -> str:
+        if v not in ("gallery", "image"):
+            raise ValueError("mode muss gallery oder image sein")
+        return v
+
+
+@router.post("/media/{item_id}/assign")
+async def assign_media(
+    item_id: int, body: AssignIn,
+    db: Session = Depends(get_db), _u=Depends(require_admin),
+) -> dict:
+    """Hängt ein Medium ins erste passende Widget eines Layouts
+    (Galerie-Liste bzw. Bild-Widget); legt das Widget bei Bedarf an.
+    Bewusst für Redakteure freigegeben – Inhalt, kein Gerätedesign."""
+    m = db.get(MediaItem, item_id)
+    if not m:
+        raise HTTPException(status_code=404, detail="Medium nicht gefunden")
+    l_ = db.get(Layout, body.layout_id)
+    if not l_:
+        raise HTTPException(status_code=404, detail="Layout nicht gefunden")
+
+    els = json.loads(json.dumps(l_.elements or []))
+    target = next((e for e in els if e.get("type") == body.mode), None)
+    if target is None:
+        target = (
+            {"type": "gallery", "x": 36, "y": 17, "w": 38, "h": 62,
+             "config": {"media_ids": [], "seconds": 8}}
+            if body.mode == "gallery"
+            else {"type": "image", "x": 36, "y": 17, "w": 38, "h": 50,
+                  "config": {"media_id": None}}
+        )
+        els.append(target)
+
+    if body.mode == "gallery":
+        ids = target["config"].setdefault("media_ids", [])
+        if item_id not in ids:
+            ids.append(item_id)
+    else:
+        target["config"]["media_id"] = item_id
+
+    l_.elements = els
+    db.commit()
+    await notify_displays()
+    log.info("media.assigned media=%s layout=%s mode=%s", item_id, l_.id, body.mode)
+    return {"ok": True}
+
+
 # ── Layouts ─────────────────────────────────────────────────────────────────
 WIDGET_TYPES = {
     "header", "clock", "date", "weather", "forecast", "text", "image", "gallery",
@@ -509,7 +759,7 @@ def layout_preview_state(
 
 @router.post("/layouts")
 async def create_layout(
-    body: LayoutIn, db: Session = Depends(get_db), _u=Depends(require_admin),
+    body: LayoutIn, db: Session = Depends(get_db), _u=Depends(require_full_admin),
 ) -> dict:
     l_ = Layout(
         name=body.name, orientation=body.orientation,
@@ -527,7 +777,7 @@ async def create_layout(
 @router.patch("/layouts/{item_id}")
 async def update_layout(
     item_id: int, body: LayoutIn,
-    db: Session = Depends(get_db), _u=Depends(require_admin),
+    db: Session = Depends(get_db), _u=Depends(require_full_admin),
 ) -> dict:
     l_ = db.get(Layout, item_id)
     if not l_:
@@ -547,7 +797,7 @@ async def update_layout(
 
 @router.delete("/layouts/{item_id}")
 async def delete_layout(
-    item_id: int, db: Session = Depends(get_db), _u=Depends(require_admin),
+    item_id: int, db: Session = Depends(get_db), _u=Depends(require_full_admin),
 ) -> dict:
     l_ = db.get(Layout, item_id)
     if not l_:
@@ -566,6 +816,25 @@ async def delete_layout(
     return {"ok": True}
 
 
+@router.post("/layouts/{item_id}/duplicate")
+async def duplicate_layout(
+    item_id: int, db: Session = Depends(get_db), _u=Depends(require_full_admin),
+) -> dict:
+    """Legt eine 1:1-Kopie als neues (Nicht-Standard-)Layout an."""
+    l_ = db.get(Layout, item_id)
+    if not l_:
+        raise HTTPException(status_code=404, detail="Layout nicht gefunden")
+    copy = Layout(
+        name=f"{l_.name} (Kopie)", orientation=l_.orientation,
+        elements=json.loads(json.dumps(l_.elements or [])), is_default=False,
+    )
+    db.add(copy)
+    db.commit()
+    await notify_displays()
+    log.info("layout.duplicated from=%s to=%s", item_id, copy.id)
+    return {"id": copy.id, "name": copy.name}
+
+
 # ── Zeitpläne ───────────────────────────────────────────────────────────────
 class ScheduleRule(BaseModel):
     start: str = "00:00"
@@ -582,9 +851,11 @@ class ScheduleIn(BaseModel):
 
 @router.get("/schedules")
 def list_schedules(db: Session = Depends(get_db), _u=Depends(require_admin)) -> list[dict]:
+    now = now_local()
     return [
         {
             **{k: getattr(s, k) for k in ("id", "name", "priority", "rules")},
+            "active_now": any(_rule_matches(r, now) for r in (s.rules or [])),
         }
         for s in db.query(Schedule).order_by(Schedule.priority.desc()).all()
     ]
@@ -592,7 +863,7 @@ def list_schedules(db: Session = Depends(get_db), _u=Depends(require_admin)) -> 
 
 @router.post("/schedules")
 async def create_schedule(
-    body: ScheduleIn, db: Session = Depends(get_db), _u=Depends(require_admin),
+    body: ScheduleIn, db: Session = Depends(get_db), _u=Depends(require_full_admin),
 ) -> dict:
     for rule in body.rules:
         if not db.get(Layout, rule.layout_id):
@@ -610,7 +881,7 @@ async def create_schedule(
 @router.patch("/schedules/{item_id}")
 async def update_schedule(
     item_id: int, body: ScheduleIn,
-    db: Session = Depends(get_db), _u=Depends(require_admin),
+    db: Session = Depends(get_db), _u=Depends(require_full_admin),
 ) -> dict:
     s = db.get(Schedule, item_id)
     if not s:
@@ -625,7 +896,7 @@ async def update_schedule(
 
 @router.delete("/schedules/{item_id}")
 async def delete_schedule(
-    item_id: int, db: Session = Depends(get_db), _u=Depends(require_admin),
+    item_id: int, db: Session = Depends(get_db), _u=Depends(require_full_admin),
 ) -> dict:
     s = db.get(Schedule, item_id)
     if s:
@@ -643,7 +914,7 @@ SETTING_KEYS = list(DEFAULT_SETTINGS.keys())
 
 
 @router.get("/settings")
-def get_settings(db: Session = Depends(get_db), _u=Depends(require_admin)) -> dict:
+def get_settings(db: Session = Depends(get_db), _u=Depends(require_full_admin)) -> dict:
     values = {key: get_setting(db, key, "") for key in SETTING_KEYS}
     weather_cache_raw = get_setting(db, "weather_cache", "")
     cache_info = {}
@@ -666,7 +937,7 @@ class SettingsIn(BaseModel):
 
 @router.put("/settings")
 async def put_settings(
-    body: SettingsIn, db: Session = Depends(get_db), _u=Depends(require_admin),
+    body: SettingsIn, db: Session = Depends(get_db), _u=Depends(require_full_admin),
 ) -> dict:
     changed_external = False
     for key, value in body.values.items():
@@ -686,7 +957,7 @@ async def put_settings(
 
 
 @router.post("/weather/refresh")
-def refresh_weather(db: Session = Depends(get_db), _u=Depends(require_admin)) -> dict:
+def refresh_weather(db: Session = Depends(get_db), _u=Depends(require_full_admin)) -> dict:
     set_setting(db, "weather_cache", "")
     db.commit()
     return weather_svc.current_weather(db)
@@ -694,7 +965,7 @@ def refresh_weather(db: Session = Depends(get_db), _u=Depends(require_admin)) ->
 
 # ── Backup ──────────────────────────────────────────────────────────────────
 @router.get("/backup")
-def download_backup(db: Session = Depends(get_db), _u=Depends(require_admin)):
+def download_backup(db: Session = Depends(get_db), _u=Depends(require_full_admin)):
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         # Datenbank ueber SQLite-Backup-API konsistent sichern

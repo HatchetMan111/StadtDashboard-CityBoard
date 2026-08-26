@@ -26,7 +26,10 @@ def client():
 
 @pytest.fixture()
 def fresh_db(client):
-    """Leert alle Tabellen und setzt frische Seed-Daten."""
+    """Leert alle Tabellen, setzt frische Seed-Daten und resetet Rate-Limits."""
+    from app.routers import admin_api
+
+    admin_api.reset_rate_limit()
     db = SessionLocal()
     for model in (Announcement, Event, MediaItem, Schedule, Display, Layout,
                   Setting, AdminUser):

@@ -245,6 +245,9 @@
                 <div class="muted">${this.esc(d.resolution)} · ${this.esc(d.orientation)}</div></td>
             <td><select data-act="layout">${layoutOpts(d.layout_id)}</select>
                 <select data-act="schedule" style="margin-top:4px">${scheduleOpts(d.schedule_id)}</select></td>
+            <td>${d.approved && d.effective_layout
+              ? `<span class="badge ok">${this.esc(d.effective_layout.name)}</span>`
+              : '<span class="muted">–</span>'}</td>
             <td style="white-space:nowrap">
               ${!d.approved ? `<button class="btn small" data-act="approve">Koppeln</button>` : ""}
               <button class="btn secondary small" data-act="edit">Bearbeiten</button>
@@ -254,7 +257,7 @@
               <button class="btn danger small" data-act="delete">Löschen</button>
             </td>
           </tr>`).join("") ||
-          `<tr><td colspan="4" class="muted">Noch keine Displays registriert.
+          `<tr><td colspan="5" class="muted">Noch keine Displays registriert.
              Öffne <code>http://SERVER:8080/display</code> am Gerät.</td></tr>`;
       };
 
@@ -347,7 +350,35 @@
     }); },
 
     /* ── Veranstaltungen ───────────────────────────────────────────────── */
-    pageEvents() { this._crudList({
+    pageEvents() {
+      const resultEl = document.getElementById("ics-result");
+      document.getElementById("ics-import").addEventListener("click", async () => {
+        const fileIn = document.getElementById("ics-file");
+        const url = document.getElementById("ics-url").value.trim();
+        if (!fileIn.files.length && !url) {
+          return this.toast("Bitte ICS-Datei wählen oder URL eingeben", true);
+        }
+        resultEl.textContent = "Importiere …";
+        try {
+          let body;
+          if (fileIn.files.length) {
+            body = { ics_text: await fileIn.files[0].text() };
+          } else {
+            body = { url };
+          }
+          const res = await this.api("/api/admin/events/import",
+            { method: "POST", body });
+          resultEl.textContent =
+            `${res.imported} importiert · ${res.duplicates} Duplikate übersprungen · ` +
+            `${res.past} vergangene ignoriert` +
+            (res.invalid ? ` · ${res.invalid} ungültig` : "");
+          fileIn.value = "";
+          document.getElementById("ics-url").value = "";
+          window.dispatchEvent(new Event("sb-reload-ev-rows"));
+        } catch (err) { resultEl.textContent = "Fehler: " + err.message; }
+      });
+
+      this._crudList({
       listId: "ev-rows", formId: "ev-form", endpoint: "/api/admin/events",
       rowHtml: e => `
         <td>${this.fmtDT(e.start_at)}${e.end_at ? "<br>bis " + this.fmtDT(e.end_at) : ""}</td>
@@ -398,8 +429,7 @@
         } catch (err) { this.toast(err.message, true); }
       });
 
-      document.getElementById(cfg.listId).addEventListener("click", async e => {
-        const del = e.target.closest("[data-del]");
+      document.getElementById(cfg.listId).addEventListener("click", async e => {        const del = e.target.closest("[data-del]");
         const ed = e.target.closest("[data-edit]");
         try {
           if (del) {
@@ -431,6 +461,11 @@
         } catch (err) { this.toast(err.message, true); }
       });
 
+      // Externe Trigger (z. B. ICS-Import) können die Liste neu laden:
+      window.addEventListener(`sb-reload-${cfg.listId}`, () => {
+        reload().catch(() => {});
+      });
+
       await reload().catch(err => this.toast(err.message, true));
     },
 
@@ -451,34 +486,8 @@
           `<option value="${l.id}">${SB.esc(l.name)}${l.is_default ? " (Standard)" : ""}</option>`).join("");
       }
 
-      /* Medium in Layout-Widget einfügen (Galerie-Liste bzw. Bild-Widget) */
-      async function addToLayout(layoutId, mediaId, mode) {
-        const all = await SB.api("/api/admin/layouts");
-        const l = all.find((x) => x.id === Number(layoutId));
-        if (!l) throw new Error("Layout nicht gefunden");
-        const els = JSON.parse(JSON.stringify(l.elements || []));
-        let target = els.find((e) => e.type === mode);
-        if (!target) {
-          target = mode === "gallery"
-            ? { type: "gallery", x: 36, y: 17, w: 38, h: 62,
-                config: { media_ids: [], seconds: 8 } }
-            : { type: "image", x: 36, y: 17, w: 38, h: 50,
-                config: { media_id: null } };
-          els.push(target);
-        }
-        if (mode === "gallery") {
-          const ids = target.config.media_ids || (target.config.media_ids = []);
-          if (!ids.includes(mediaId)) ids.push(mediaId);
-        } else {
-          target.config.media_id = mediaId;
-        }
-        await SB.api(`/api/admin/layouts/${l.id}`, {
-          method: "PATCH",
-          body: { name: l.name, orientation: l.orientation,
-            elements: els, is_default: l.is_default },
-        });
-        return l;
-      }
+      /* Zuweisung läuft über POST /api/admin/media/{id}/assign
+         (serverseitig, funktioniert auch für Redakteure). */
 
       async function reload() {
         const items = await SB.api("/api/admin/media");
@@ -512,10 +521,14 @@
             const mediaId = Number(item.dataset.id);
             const layoutId = layoutSel.value;
             if (!layoutId) return SB.toast("Erst ein Layout oben wählen", true);
-            const l = await addToLayout(Number(layoutId), mediaId,
-              gal ? "gallery" : "image");
-            lastAssigned[mediaId] = l.id;
-            SB.toast(`Zu „${l.name}" hinzugefügt – Vorschau unten`);
+            const mode = gal ? "gallery" : "image";
+            await SB.api(`/api/admin/media/${mediaId}/assign`, {
+              method: "POST",
+              body: { layout_id: Number(layoutId), mode },
+            });
+            lastAssigned[mediaId] = Number(layoutId);
+            SB.toast(gal ? "Zur Galerie hinzugefügt – ▶ Vorschau unten"
+                         : "Als Bild gesetzt – ▶ Vorschau unten");
             await reload();
           } else if (del) {
             if (!confirm("Medium wirklich löschen?")) return;
@@ -604,6 +617,53 @@
           canvas.appendChild(d);
           positionEl(i);
         });
+        ensureGuides();
+      }
+
+      /* ── Historie (Undo) ── */
+      const hist = [];
+      const pushHistory = () => {
+        hist.push(JSON.stringify(S.els));
+        if (hist.length > 50) hist.shift();
+      };
+      const undo = () => {
+        if (!hist.length) return SB.toast("Nichts zum Rückgängigmachen");
+        S.els = JSON.parse(hist.pop());
+        S.sel = -1;
+        draw(); buildProps();
+      };
+      $("ed-undo").addEventListener("click", undo);
+      document.addEventListener("keydown", (e) => {
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
+          const t = e.target;
+          if (t && /^(input|textarea|select)$/i.test(t.tagName)) return;
+          e.preventDefault(); undo();
+        }
+      });
+
+      const snapStep = () => Number($("ed-snap").value) || 0;
+      const snapVal = (v) => {
+        const s = snapStep();
+        return s ? Math.round(v / s) * s : Math.round(v);
+      };
+
+      function ensureGuides() {
+        if (!canvas.querySelector(".ed-guide.v")) {
+          const v = document.createElement("div");
+          v.className = "ed-guide v"; v.style.display = "none";
+          const h = document.createElement("div");
+          h.className = "ed-guide h"; h.style.display = "none";
+          canvas.append(v, h);
+        }
+      }
+      function showGuides(el, on) {
+        ensureGuides();
+        const v = canvas.querySelector(".ed-guide.v");
+        const h = canvas.querySelector(".ed-guide.h");
+        const centerV = Math.abs((el.x + el.w / 2) - 50) < 1.2;
+        const centerH = Math.abs((el.y + el.h / 2) - 50) < 1.2;
+        v.style.display = on && centerV ? "" : "none";
+        h.style.display = on && centerH ? "" : "none";
       }
 
       let drag = null;
@@ -618,6 +678,7 @@
           startX: e.clientX, startY: e.clientY,
           orig: { ...S.els[i] }, rect: canvas.getBoundingClientRect(),
           moved: false,
+          snapshot: JSON.stringify(S.els),
         };
         canvas.setPointerCapture(e.pointerId);
         e.preventDefault();
@@ -629,17 +690,24 @@
         if (Math.abs(dx) > 0.4 || Math.abs(dy) > 0.4) drag.moved = true;
         const el = S.els[drag.i];
         if (drag.mode === "move") {
-          el.x = clamp(Math.round(drag.orig.x + dx), 0, 100 - el.w);
-          el.y = clamp(Math.round(drag.orig.y + dy), 0, 100 - el.h);
+          el.x = clamp(snapVal(drag.orig.x + dx), 0, 100 - el.w);
+          el.y = clamp(snapVal(drag.orig.y + dy), 0, 100 - el.h);
         } else {
-          el.w = clamp(Math.round(drag.orig.w + dx), 3, 100 - el.x);
-          el.h = clamp(Math.round(drag.orig.h + dy), 3, 100 - el.y);
+          el.w = clamp(snapVal(drag.orig.w + dx), 3, 100 - el.x);
+          el.h = clamp(snapVal(drag.orig.h + dy), 3, 100 - el.y);
         }
         positionEl(drag.i);
+        showGuides(el, drag.mode === "move");
         syncPosInputs();
       });
-      canvas.addEventListener("pointerup", () => { drag = null; });
-      canvas.addEventListener("pointercancel", () => { drag = null; });
+      const endDrag = () => {
+        if (!drag) return;
+        showGuides(null, false);
+        if (drag.moved) hist.push(drag.snapshot); // Undo-Punkt für diesen Zug
+        drag = null;
+      };
+      canvas.addEventListener("pointerup", endDrag);
+      canvas.addEventListener("pointercancel", endDrag);
 
       /* ── Auswahl & Eigenschaften ── */
       function select(i) {
@@ -657,11 +725,12 @@
         wrap.append(lab, inputEl);
         return wrap;
       }
-      function numInput(value, min, max, onInput) {
+      function numInput(value, min, max, onInput, onCommit) {
         const inp = document.createElement("input");
         inp.type = "number"; inp.value = value;
         inp.min = min; inp.max = max;
         inp.addEventListener("input", () => onInput(Number(inp.value)));
+        if (onCommit) inp.addEventListener("change", () => onCommit());
         return inp;
       }
 
@@ -697,7 +766,7 @@
             else if (k === "w") el.w = clamp(v, 3, 100 - el.x);
             else { el.h = clamp(v, 3, 100 - el.y); }
             positionEl(S.sel);
-          });
+          }, pushHistory);
           inp.dataset.pos = k;
           grid.appendChild(field(lbl, inp));
         });
@@ -709,6 +778,7 @@
           ta.rows = 3; ta.style.width = "100%";
           ta.value = cfg.text || "";
           ta.addEventListener("input", () => { cfg.text = ta.value; });
+          ta.addEventListener("change", pushHistory);
           propsBox.appendChild(field("Text", ta));
         }
 
@@ -736,6 +806,7 @@
               chip.className = "chip";
               chip.innerHTML = `${m ? `<img src="${m.thumb_url || m.url}">` : ""}${SB.esc(m ? m.title : "?" )} <span class="x">✕</span>`;
               chip.addEventListener("click", () => {
+                pushHistory();
                 cfg.media_ids.splice(idx, 1); renderChips();
               });
               chosenWrap.appendChild(chip);
@@ -749,6 +820,7 @@
               chip.className = "chip add";
               chip.innerHTML = `＋ <img src="${m.thumb_url || m.url}">${SB.esc(m.title)}`;
               chip.addEventListener("click", () => {
+                pushHistory();
                 cfg.media_ids.push(m.id); renderChips();
               });
               availWrap.appendChild(chip);
@@ -794,21 +866,43 @@
         }
 
         const actions = document.createElement("p");
-        actions.style.cssText = "display:flex;gap:8px;margin-top:10px";
-        const del = document.createElement("button");
-        del.className = "btn danger small"; del.textContent = "Element löschen";
-        del.addEventListener("click", () => {
-          S.els.splice(S.sel, 1); select(-1); draw();
-        });
-        const dup = document.createElement("button");
-        dup.className = "btn secondary small"; dup.textContent = "Duplizieren";
-        dup.addEventListener("click", () => {
-          const copy = JSON.parse(JSON.stringify(el));
-          copy.x = clamp(copy.x + 2, 0, 100 - copy.w);
-          copy.y = clamp(copy.y + 2, 0, 100 - copy.h);
-          S.els.splice(S.sel + 1, 0, copy); select(S.sel + 1); draw();
-        });
-        actions.append(del, dup);
+        actions.style.cssText = "display:flex;gap:8px;margin-top:10px;flex-wrap:wrap";
+
+        const mkBtn = (label, cls, fn) => {
+          const b = document.createElement("button");
+          b.type = "button"; b.className = `btn ${cls} small`;
+          b.textContent = label;
+          b.addEventListener("click", fn);
+          return b;
+        };
+
+        actions.append(
+          mkBtn("Nach vorn ⬆", "secondary", () => {
+            if (S.sel >= S.els.length - 1) return;
+            pushHistory();
+            [S.els[S.sel], S.els[S.sel + 1]] = [S.els[S.sel + 1], S.els[S.sel]];
+            S.sel += 1; draw();
+          }),
+          mkBtn("Nach hinten ⬇", "secondary", () => {
+            if (S.sel <= 0) return;
+            pushHistory();
+            [S.els[S.sel - 1], S.els[S.sel]] = [S.els[S.sel], S.els[S.sel - 1]];
+            S.sel -= 1; draw();
+          }),
+          mkBtn("Duplizieren", "secondary", () => {
+            pushHistory();
+            const copy = JSON.parse(JSON.stringify(el));
+            copy.x = clamp(copy.x + 2, 0, 100 - copy.w);
+            copy.y = clamp(copy.y + 2, 0, 100 - copy.h);
+            S.els.splice(S.sel + 1, 0, copy);
+            select(S.sel + 1); draw();
+          }),
+          mkBtn("Löschen", "danger", () => {
+            pushHistory();
+            S.els.splice(S.sel, 1);
+            select(-1); draw();
+          }),
+        );
         propsBox.appendChild(actions);
       }
 
@@ -817,6 +911,7 @@
         const btn = e.target.closest("[data-widget]");
         if (!btn) return;
         const type = btn.dataset.widget;
+        pushHistory();
         S.els.push({ type, ...JSON.parse(JSON.stringify(DEFAULTS[type])) });
         select(S.els.length - 1);
         draw();
@@ -831,6 +926,7 @@
                 <div class="muted">${SB.esc(l.orientation)} · ${(l.elements || []).length} Elemente</div></td>
             <td style="white-space:nowrap">
               <button class="btn secondary small" data-load="${l.id}">Laden</button>
+              <button class="btn secondary small" data-dup="${l.id}">Duplizieren</button>
               ${l.is_default ? "" :
                 `<button class="btn secondary small" data-default="${l.id}">Standard</button>`}
               <button class="btn danger small" data-del="${l.id}">Löschen</button>
@@ -853,6 +949,17 @@
         const frame = $("ed-preview-frame");
         const full = $("ed-preview-full");
         const hint = frame.previousElementSibling;
+        const portrait = $("layout-orientation").value === "portrait";
+        frame.style.aspectRatio = portrait ? "9 / 16" : "16 / 9";
+        if (portrait) {
+          frame.style.height = "76vh";
+          frame.style.width = "auto";
+          frame.style.margin = "0 auto";
+        } else {
+          frame.style.height = "";
+          frame.style.width = "100%";
+          frame.style.margin = "";
+        }
         if (!S.id) {
           frame.style.display = "none"; full.classList.add("hidden");
           if (hint) hint.style.display = "";
@@ -868,11 +975,18 @@
 
       $("layout-list").addEventListener("click", async (e) => {
         const load = e.target.closest("[data-load]");
+        const dup = e.target.closest("[data-dup]");
         const def = e.target.closest("[data-default]");
         const del = e.target.closest("[data-del]");
         try {
           if (load) loadLayout(Number(load.dataset.load));
-          else if (def) {
+          else if (dup) {
+            const res = await SB.api(`/api/admin/layouts/${dup.dataset.dup}/duplicate`,
+              { method: "POST" });
+            await reloadAll();
+            if (res.id) loadLayout(res.id);
+            SB.toast(`Kopie „${res.name}" erstellt`);
+          } else if (def) {
             const l = S.layouts.find((x) => x.id === Number(def.dataset.default));
             await SB.api(`/api/admin/layouts/${l.id}`, {
               method: "PATCH",
@@ -937,8 +1051,9 @@
             ["x", "y", "w", "h"].forEach((k) => { el[k] = Number(el[k]) || 0; });
             el.config = el.config || {};
           }
+          pushHistory();
           S.els = parsed; S.sel = -1; draw(); buildProps();
-          SB.toast("JSON übernommen");
+          SB.toast("JSON übernommen (Strg+Z macht es rückgängig)");
         } catch (err) { SB.toast("JSON-Fehler: " + err.message, true); }
       });
 
@@ -1006,7 +1121,9 @@
           this.api("/api/admin/schedules"), this.api("/api/admin/layouts")]);
         listBody.innerHTML = schedules.map(s => `
           <tr data-id="${s.id}">
-            <td>${this.esc(s.name)}<div class="muted">Priorität ${s.priority} ·
+            <td>${this.esc(s.name)}
+                ${s.active_now ? '<span class="badge ok">jetzt aktiv</span>' : ""}
+                <div class="muted">Priorität ${s.priority} ·
                 ${(s.rules || []).length} Regel(n)</div></td>
             <td class="muted">${(s.rules || []).map(r =>
               `${r.start}–${r.end}`).join("<br>") || "–"}</td>
@@ -1114,14 +1231,54 @@
         } catch (err) { out.textContent = "Fehler: " + err.message; }
       });
 
-      document.getElementById("pw-form").addEventListener("submit", async e => {
+      /* Benutzerverwaltung (nur Admin) */
+      const me = document.getElementById("me-user")?.textContent.trim();
+      async function reloadUsers() {
+        const users = await this.api("/api/admin/users");
+        document.querySelector("#users-table tbody").innerHTML =
+          users.map(u => `
+            <tr><td>${this.esc(u.username)}
+                <span class="badge">${u.role}</span></td>
+                <td style="text-align:right">
+                  ${u.username === me ? "" :
+                    `<button class="btn danger small" data-deluser="${u.id}">Löschen</button>`}
+                </td></tr>`).join("");
+      }
+      document.querySelector("#users-table").addEventListener("click", async (e) => {
+        const del = e.target.closest("[data-deluser]");
+        if (!del) return;
+        if (!confirm("Benutzer wirklich löschen?")) return;
+        try {
+          await this.api(`/api/admin/users/${del.dataset.deluser}`, { method: "DELETE" });
+          await reloadUsers.call(this);
+        } catch (err) { this.toast(err.message, true); }
+      });
+      document.getElementById("user-create").addEventListener("click", async () => {
+        const f = document.getElementById("user-form");
+        try {
+          await this.api("/api/admin/users", {
+            method: "POST",
+            body: { username: f.username.value.trim(),
+              password: f.password.value, role: f.role.value },
+          });
+          f.reset();
+          this.toast("Benutzer angelegt");
+          await reloadUsers.call(this);
+        } catch (err) { this.toast(err.message, true); }
+      });
+      await reloadUsers.call(this).catch(err => this.toast(err.message, true));
+    },
+
+    /* ── Konto (Passwort ändern, alle Rollen) ──────────────────────────── */
+    pageKonto() {
+      document.getElementById("pw-form").addEventListener("submit", async (e) => {
         e.preventDefault();
         const f = e.target;
         try {
           await this.api("/api/admin/password", {
             method: "PUT", body: { old: f.old.value, new: f.new.value } });
           f.reset();
-          this.toast("Passwort geändert");
+          this.toast("Passwort geändert – Initial-Passwort wurde entfernt");
         } catch (err) { this.toast(err.message, true); }
       });
     },

@@ -1,6 +1,7 @@
 """StadtDashboard – FastAPI-Anwendung."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 
@@ -22,9 +23,13 @@ app = FastAPI(title=config.APP_NAME, version=config.VERSION, docs_url=None, redo
 
 
 @app.on_event("startup")
-def on_startup() -> None:
+async def on_startup() -> None:
     init_db()
-    log.info("%s v%s gestartet (Port %s)", config.APP_NAME, config.VERSION, config.PORT)
+    from .services import notifier
+
+    app.state.notifier_task = asyncio.create_task(notifier.loop())
+    log.info("%s v%s gestartet (Port %s) – Offline-Wächter aktiv",
+             config.APP_NAME, config.VERSION, config.PORT)
 
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"

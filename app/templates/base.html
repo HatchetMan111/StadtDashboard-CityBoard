@@ -12,14 +12,17 @@
     <div class="brand">{{ app_name }}<span>v{{ version }} · Open Source</span></div>
     <nav>
       <a href="/" data-nav="dashboard">Dashboard</a>
-      <a href="/displays" data-nav="displays">Displays</a>
+      {% if role != 'editor' %}<a href="/displays" data-nav="displays">Displays</a>{% endif %}
       <a href="/announcements" data-nav="announcements">Bekanntmachungen</a>
       <a href="/events" data-nav="events">Veranstaltungen</a>
       <a href="/media" data-nav="media">Medien</a>
+      {% if role != 'editor' %}
       <a href="/layouts" data-nav="layouts">Layouts</a>
       <a href="/schedules" data-nav="schedules">Zeitpläne</a>
       <a href="/settings" data-nav="settings">Einstellungen</a>
       <a href="/datenschutz" data-nav="datenschutz">Datenschutz</a>
+      {% endif %}
+      <a href="/konto" data-nav="konto">Konto</a>
     </nav>
     <div class="foot">
       Angemeldet: {{ user }}

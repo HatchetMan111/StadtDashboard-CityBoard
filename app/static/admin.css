@@ -141,6 +141,10 @@ code { background: #eef2f7; padding: 1px 6px; border-radius: 6px; font-size: 13p
   padding: 2px 5px; border-radius: 0 0 4px 0;
   background: rgba(15,23,42,.75); color: #cbd5e1;
 }
+.ed-guide { position: absolute; background: #f59e0b; opacity: .9;
+            pointer-events: none; z-index: 8; }
+.ed-guide.v { left: 50%; top: 0; width: 1px; height: 100%; }
+.ed-guide.h { top: 50%; left: 0; height: 1px; width: 100%; }
 
 .props-grid { display: grid; grid-template-columns: repeat(4, 1fr);
               gap: 8px; margin-bottom: 10px; }

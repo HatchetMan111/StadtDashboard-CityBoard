@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Konto · {{ app_name }}{% endblock %}
+{% block page %}konto{% endblock %}
+{% block content %}
+<h1>Konto</h1>
+<p class="subtitle">Angemeldet als <strong>{{ user }}</strong>
+  {% if role == 'editor' %}(Rolle: Redakteur){% else %}(Rolle: Administrator){% endif %}</p>
+
+<div class="panel" style="max-width:560px">
+  <h2>Passwort ändern</h2>
+  <form id="pw-form">
+    <div class="field mt"><label>Aktuelles Passwort</label>
+      <input type="password" name="old" required autocomplete="current-password"></div>
+    <div class="field mt"><label>Neues Passwort (min. 8 Zeichen)</label>
+      <input type="password" name="new" minlength="8" required
+             autocomplete="new-password"></div>
+    <button class="btn mt" type="submit">Passwort ändern</button>
+  </form>
+  <p class="muted mt">Nach der Änderung wird die Initial-Passwort-Datei auf dem
+     Server automatisch gelöscht.</p>
+</div>
+{% endblock %}

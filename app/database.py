@@ -48,10 +48,24 @@ def get_db():
 
 
 def init_db() -> None:
-    """Erzeugt Schema und Seed-Daten (idempotent)."""
+    """Erzeugt Schema, Mini-Migrationen und Seed-Daten (idempotent)."""
     from . import models  # noqa: F401
     from .seed import seed_if_empty
 
     Base.metadata.create_all(bind=engine)
+
+    # Mini-Migrationen fuer Bestandsdatenbanken (create_all aendert keine
+    # bestehenden Tabellen). Jeder Schritt muss idempotent sein.
+    migrations = [
+        # 0.3.0: Rollen für Admin-Benutzer
+        "ALTER TABLE admin_users ADD COLUMN role VARCHAR(20) NOT NULL DEFAULT 'admin'",
+    ]
+    with engine.begin() as conn:
+        for stmt in migrations:
+            try:
+                conn.exec_driver_sql(stmt)
+            except Exception:  # noqa: BLE001 – Spalte existiert bereits
+                pass
+
     with SessionLocal() as db:
         seed_if_empty(db)

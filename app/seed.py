@@ -16,6 +16,7 @@ DEFAULT_SETTINGS = {
     "city_name": "Musterstadt",
     "city_website": "https://www.musterstadt.de",
     "ticker_text": "",
+    "ticker_speed_seconds": "30",
     "logo_media_id": "",
     "weather_mode": "manual",  # manual | open_meteo
     "weather_manual_temp": "21.0",
@@ -25,6 +26,15 @@ DEFAULT_SETTINGS = {
     "weather_interval_minutes": "30",
     "allow_external": "false",
     "scene_seconds": "12",
+    "notify_enabled": "false",
+    "offline_threshold_minutes": "10",
+    "notify_webhook_url": "",
+    "smtp_host": "",
+    "smtp_port": "587",
+    "smtp_user": "",
+    "smtp_pass": "",
+    "smtp_from": "",
+    "notify_email_to": "",
 }
 
 LANDSCAPE_ELEMENTS = [
