@@ -2,6 +2,8 @@ import os
 import secrets
 from pathlib import Path
 
+from . import __version__
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = Path(os.environ.get("SB_DATA_DIR", BASE_DIR / "data"))
 UPLOAD_DIR = DATA_DIR / "uploads"
@@ -10,7 +12,7 @@ SECRET_FILE = DATA_DIR / "secret.key"
 INITIAL_PW_FILE = DATA_DIR / "initial_admin_password.txt"
 
 APP_NAME = "StadtDashboard"
-VERSION = "0.1.0"
+VERSION = __version__
 
 HOST = os.environ.get("SB_HOST", "0.0.0.0")
 PORT = int(os.environ.get("SB_PORT", "8080"))

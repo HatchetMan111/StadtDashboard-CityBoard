@@ -4,7 +4,8 @@
 {% block content %}
 <h1>Layouts</h1>
 <p class="subtitle">
-  Widgets als JSON mit Positionen in Prozent (x, y, w, h). Vorschau unten rechts.
+  Dashboard zusammenstellen: Widgets aus der Palette auf die Fläche ziehen,
+  verschieben, am Griff in der Ecke skalieren und rechts die Inhalte zuweisen.
 </p>
 
 <div class="grid-2">
@@ -12,22 +13,30 @@
     <div class="panel">
       <table><tbody id="layout-list"></tbody></table>
     </div>
+
     <div class="panel">
       <h2>Widget hinzufügen</h2>
-      <p style="display:flex;flex-wrap:wrap;gap:6px">
-        <button class="btn secondary small" data-widget="header">Kopf</button>
-        <button class="btn secondary small" data-widget="clock">Uhr</button>
-        <button class="btn secondary small" data-widget="date">Datum</button>
-        <button class="btn secondary small" data-widget="weather">Wetter</button>
-        <button class="btn secondary small" data-widget="forecast">Vorhersage</button>
-        <button class="btn secondary small" data-widget="text">Text</button>
-        <button class="btn secondary small" data-widget="image">Bild</button>
-        <button class="btn secondary small" data-widget="gallery">Bildergalerie</button>
-        <button class="btn secondary small" data-widget="events">Veranstaltungen</button>
-        <button class="btn secondary small" data-widget="announcements">Bekanntmachungen</button>
-        <button class="btn secondary small" data-widget="qr">QR-Code</button>
-        <button class="btn secondary small" data-widget="ticker">Ticker</button>
+      <p style="display:flex;flex-wrap:wrap;gap:6px" id="palette">
+        <button class="btn secondary small" data-widget="header">🏙 Kopf</button>
+        <button class="btn secondary small" data-widget="clock">🕐 Uhr</button>
+        <button class="btn secondary small" data-widget="date">📅 Datum</button>
+        <button class="btn secondary small" data-widget="weather">🌤 Wetter</button>
+        <button class="btn secondary small" data-widget="forecast">🌦 Vorhersage</button>
+        <button class="btn secondary small" data-widget="text">📝 Text</button>
+        <button class="btn secondary small" data-widget="image">🖼 Bild</button>
+        <button class="btn secondary small" data-widget="gallery">🎞 Galerie</button>
+        <button class="btn secondary small" data-widget="events">🎉 Veranstaltungen</button>
+        <button class="btn secondary small" data-widget="announcements">📢 Bekanntmachungen</button>
+        <button class="btn secondary small" data-widget="qr">🔳 QR-Code</button>
+        <button class="btn secondary small" data-widget="ticker">📰 Ticker</button>
       </p>
+      <p class="muted">Tipp: Ziehen verschiebt · Griff unten rechts skaliert ·
+         Klick wählt aus und zeigt rechts die Eigenschaften.</p>
+    </div>
+
+    <div class="panel">
+      <h2>Eigenschaften</h2>
+      <div id="ed-props"><p class="muted">Kein Element ausgewählt.</p></div>
     </div>
   </div>
 
@@ -45,14 +54,21 @@
         <button class="btn secondary" id="layout-new" type="button">Neu</button>
       </form>
     </div>
+
     <div class="panel">
-      <h2>Elemente (JSON)</h2>
-      <textarea id="layout-json" rows="14"
-        style="width:100%;font-family:ui-monospace,monospace;font-size:12.5px">[]</textarea>
+      <div id="ed-canvas" class="preview-box ed-canvas"></div>
     </div>
+
     <div class="panel">
-      <h2>Vorschau</h2>
-      <div id="layout-preview" class="preview-box"></div>
+      <details id="ed-json-details">
+        <summary style="cursor:pointer;font-weight:600">JSON-Ansicht (für Experten)</summary>
+        <textarea id="layout-json" rows="10"
+          style="width:100%;margin-top:10px;font-family:ui-monospace,monospace;font-size:12.5px"></textarea>
+        <p style="margin-top:8px;display:flex;gap:8px">
+          <button class="btn secondary small" id="ed-json-fill" type="button">Aus Editor füllen</button>
+          <button class="btn secondary small" id="ed-json-import" type="button">In Editor übernehmen</button>
+        </p>
+      </details>
     </div>
   </div>
 </div>

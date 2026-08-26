@@ -129,11 +129,15 @@
     /* ── Dashboard ─────────────────────────────────────────────────────── */
     async pageDashboard() {
       try {
-        const [displays, anns, events] = await Promise.all([
+        const [displays, anns, events, status] = await Promise.all([
           this.api("/api/admin/displays"),
           this.api("/api/admin/announcements"),
           this.api("/api/admin/events"),
+          this.api("/api/admin/status"),
         ]);
+        if (status.initial_password_active) {
+          document.getElementById("pw-banner").classList.remove("hidden");
+        }
         const online = displays.filter(d => d.online && d.approved).length;
         const pending = displays.filter(d => !d.approved).length;
         const activeAnns = anns.filter(a => a.currently_valid);
@@ -438,16 +442,19 @@
       await reload().catch(err => this.toast(err.message, true));
     },
 
-    /* ── Layouts ───────────────────────────────────────────────────────── */
+    /* ── Layouts: Drag-&-Drop-Editor ───────────────────────────────────── */
     async pageLayouts() {
-      let layouts = [], currentId = null;
-      const nameIn = document.getElementById("layout-name");
-      const orientSel = document.getElementById("layout-orientation");
-      const jsonTa = document.getElementById("layout-json");
-      const preview = document.getElementById("layout-preview");
-      const list = document.getElementById("layout-list");
-
-      const WIDGETS = {
+      const S = { layouts: [], id: null, els: [], sel: -1, media: [] };
+      const $ = (id) => document.getElementById(id);
+      const canvas = $("ed-canvas"), propsBox = $("ed-props");
+      const ICONS = { header: "🏙", clock: "🕐", date: "📅", weather: "🌤",
+        forecast: "🌦", text: "📝", image: "🖼", gallery: "🎞",
+        events: "🎉", announcements: "📢", qr: "🔳", ticker: "📰" };
+      const LABELS = { header: "Kopf", clock: "Uhr", date: "Datum",
+        weather: "Wetter", forecast: "Vorhersage", text: "Text",
+        image: "Bild", gallery: "Galerie", events: "Veranstaltungen",
+        announcements: "Bekanntmachungen", qr: "QR-Code", ticker: "Ticker" };
+      const DEFAULTS = {
         header: { x: 3, y: 3, w: 40, h: 11, config: {} },
         clock: { x: 68, y: 3, w: 15, h: 11, config: {} },
         date: { x: 55, y: 3, w: 12, h: 11, config: {} },
@@ -455,129 +462,375 @@
         forecast: { x: 80, y: 15, w: 17, h: 20, config: {} },
         text: { x: 40, y: 40, w: 30, h: 15, config: { text: "Willkommen!" } },
         image: { x: 36, y: 17, w: 38, h: 50, config: { media_id: null } },
-        gallery: { x: 36, y: 17, w: 38, h: 62, config: { media_ids: [], seconds: 8 } },
+        gallery: { x: 36, y: 17, w: 38, h: 62,
+                   config: { media_ids: [], seconds: 8 } },
         events: { x: 77, y: 17, w: 20, h: 46, config: { count: 5 } },
         announcements: { x: 3, y: 17, w: 30, h: 62, config: { count: 4 } },
-        qr: { x: 77, y: 65, w: 20, h: 19, config: { setting_key: "city_website",
-          label: "Mehr erfahren" } },
+        qr: { x: 77, y: 65, w: 20, h: 19,
+              config: { setting_key: "city_website", url: "", label: "Mehr erfahren" } },
         ticker: { x: 0, y: 91, w: 100, h: 9, config: {} },
       };
+      const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
-      const parseJson = () => {
-        try {
-          const val = JSON.parse(jsonTa.value);
-          if (!Array.isArray(val)) throw new Error("Elemente müssen ein Array sein");
-          return val;
-        } catch (err) {
-          this.toast("JSON-Fehler: " + err.message, true);
-          return null;
+      /* ── Canvas ── */
+      function positionEl(i) {
+        const el = S.els[i];
+        const div = canvas.querySelector(`[data-i="${i}"]`);
+        if (!div) return;
+        div.style.left = el.x + "%";
+        div.style.top = el.y + "%";
+        div.style.width = el.w + "%";
+        div.style.height = el.h + "%";
+      }
+      function draw() {
+        canvas.className = "preview-box ed-canvas" +
+          ($("layout-orientation").value === "portrait" ? " portrait" : "");
+        canvas.innerHTML = "";
+        S.els.forEach((el, i) => {
+          const d = document.createElement("div");
+          d.className = "ed-el" + (i === S.sel ? " sel" : "");
+          d.dataset.i = i;
+          const badge = document.createElement("span");
+          badge.className = "ed-badge";
+          badge.textContent = `${ICONS[el.type] || "▫"} ${LABELS[el.type] || el.type}`;
+          d.appendChild(badge);
+          if (i === S.sel) {
+            const h = document.createElement("span");
+            h.className = "ed-handle";
+            d.appendChild(h);
+          }
+          canvas.appendChild(d);
+          positionEl(i);
+        });
+      }
+
+      let drag = null;
+      canvas.addEventListener("pointerdown", (e) => {
+        const target = e.target.closest(".ed-el");
+        if (!target) { select(-1); return; }
+        const i = Number(target.dataset.i);
+        select(i);
+        drag = {
+          i,
+          mode: e.target.classList.contains("ed-handle") ? "resize" : "move",
+          startX: e.clientX, startY: e.clientY,
+          orig: { ...S.els[i] }, rect: canvas.getBoundingClientRect(),
+          moved: false,
+        };
+        canvas.setPointerCapture(e.pointerId);
+        e.preventDefault();
+      });
+      canvas.addEventListener("pointermove", (e) => {
+        if (!drag) return;
+        const dx = ((e.clientX - drag.startX) / drag.rect.width) * 100;
+        const dy = ((e.clientY - drag.startY) / drag.rect.height) * 100;
+        if (Math.abs(dx) > 0.4 || Math.abs(dy) > 0.4) drag.moved = true;
+        const el = S.els[drag.i];
+        if (drag.mode === "move") {
+          el.x = clamp(Math.round(drag.orig.x + dx), 0, 100 - el.w);
+          el.y = clamp(Math.round(drag.orig.y + dy), 0, 100 - el.h);
+        } else {
+          el.w = clamp(Math.round(drag.orig.w + dx), 3, 100 - el.x);
+          el.h = clamp(Math.round(drag.orig.h + dy), 3, 100 - el.y);
         }
-      };
-      const drawPreview = () => {
-        const els = parseJson() || [];
-        preview.className = "preview-box" +
-          (orientSel.value === "portrait" ? " portrait" : "");
-        preview.innerHTML = els.map((el, i) => `
-          <div class="preview-el" style="left:${el.x}%;top:${el.y}%;width:${el.w}%;height:${el.h}%"
-               title="Element ${i + 1}">${this.esc(el.type)}</div>`).join("");
-      };
+        positionEl(drag.i);
+        syncPosInputs();
+      });
+      canvas.addEventListener("pointerup", () => { drag = null; });
+      canvas.addEventListener("pointercancel", () => { drag = null; });
 
-      const renderList = () => {
-        list.innerHTML = layouts.map(l => `
-          <tr data-id="${l.id}" class="${l.id === currentId ? "current" : ""}">
-            <td>${this.esc(l.name)} ${l.is_default ? '<span class="badge ok">Standard</span>' : ""}
-                <div class="muted">${this.esc(l.orientation)} · ${(l.elements || []).length} Elemente</div></td>
+      /* ── Auswahl & Eigenschaften ── */
+      function select(i) {
+        S.sel = i;
+        canvas.querySelectorAll(".ed-el").forEach((d) =>
+          d.classList.toggle("sel", Number(d.dataset.i) === i));
+        buildProps();
+      }
+
+      function field(labelText, inputEl) {
+        const wrap = document.createElement("span");
+        wrap.className = "field";
+        const lab = document.createElement("label");
+        lab.textContent = labelText;
+        wrap.append(lab, inputEl);
+        return wrap;
+      }
+      function numInput(value, min, max, onInput) {
+        const inp = document.createElement("input");
+        inp.type = "number"; inp.value = value;
+        inp.min = min; inp.max = max;
+        inp.addEventListener("input", () => onInput(Number(inp.value)));
+        return inp;
+      }
+
+      function syncPosInputs() {
+        if (S.sel < 0) return;
+        const el = S.els[S.sel];
+        ["x", "y", "w", "h"].forEach((k) => {
+          const inp = propsBox.querySelector(`[data-pos="${k}"]`);
+          if (inp && document.activeElement !== inp) inp.value = el[k];
+        });
+      }
+
+      function buildProps() {
+        propsBox.innerHTML = "";
+        if (S.sel < 0) {
+          propsBox.innerHTML =
+            '<p class="muted">Kein Element ausgewählt – auf ein Widget klicken.</p>';
+          return;
+        }
+        const el = S.els[S.sel];
+        const cfg = el.config;
+
+        const head = document.createElement("p");
+        head.innerHTML = `<strong>${ICONS[el.type] || ""} ${LABELS[el.type] || el.type}</strong>`;
+        propsBox.appendChild(head);
+
+        const grid = document.createElement("div");
+        grid.className = "props-grid";
+        [["x", "X %"], ["y", "Y %"], ["w", "Breite"], ["h", "Höhe"]].forEach(([k, lbl]) => {
+          const inp = numInput(el[k], 0, 100, (v) => {
+            if (k === "x") el.x = clamp(v, 0, 100 - el.w);
+            else if (k === "y") el.y = clamp(v, 0, 100 - el.h);
+            else if (k === "w") el.w = clamp(v, 3, 100 - el.x);
+            else { el.h = clamp(v, 3, 100 - el.y); }
+            positionEl(S.sel);
+          });
+          inp.dataset.pos = k;
+          grid.appendChild(field(lbl, inp));
+        });
+        propsBox.appendChild(grid);
+
+        /* Typ-spezifische Konfiguration */
+        if (el.type === "text") {
+          const ta = document.createElement("textarea");
+          ta.rows = 3; ta.style.width = "100%";
+          ta.value = cfg.text || "";
+          ta.addEventListener("input", () => { cfg.text = ta.value; });
+          propsBox.appendChild(field("Text", ta));
+        }
+
+        if (el.type === "image") {
+          const sel = document.createElement("select");
+          sel.style.width = "100%";
+          sel.innerHTML = `<option value="">– Medium wählen –</option>` +
+            S.media.map((m) => `<option value="${m.id}" ${String(cfg.media_id) === String(m.id) ? "selected" : ""}>${SB.esc(m.title)}</option>`).join("");
+          sel.addEventListener("change", () => { cfg.media_id = sel.value ? Number(sel.value) : null; });
+          propsBox.appendChild(field("Medium", sel));
+        }
+
+        if (el.type === "gallery") {
+          const chosenWrap = document.createElement("div");
+          chosenWrap.className = "chips";
+          const availWrap = document.createElement("div");
+          availWrap.className = "chips";
+
+          function renderChips() {
+            chosenWrap.innerHTML = "<strong style='font-size:12px'>In Galerie (Reihenfolge = Klick-Reihenfolge):</strong>";
+            availWrap.innerHTML = "<strong style='font-size:12px'>Verfügbare Medien:</strong>";
+            cfg.media_ids.forEach((mid, idx) => {
+              const m = S.media.find((x) => x.id === mid);
+              const chip = document.createElement("span");
+              chip.className = "chip";
+              chip.innerHTML = `${m ? `<img src="${m.thumb_url || m.url}">` : ""}${SB.esc(m ? m.title : "?" )} <span class="x">✕</span>`;
+              chip.addEventListener("click", () => {
+                cfg.media_ids.splice(idx, 1); renderChips();
+              });
+              chosenWrap.appendChild(chip);
+            });
+            if (!cfg.media_ids.length) {
+              chosenWrap.insertAdjacentHTML("beforeend",
+                '<span class="muted">noch leer</span>');
+            }
+            S.media.filter((m) => !cfg.media_ids.includes(m.id)).forEach((m) => {
+              const chip = document.createElement("span");
+              chip.className = "chip add";
+              chip.innerHTML = `＋ <img src="${m.thumb_url || m.url}">${SB.esc(m.title)}`;
+              chip.addEventListener("click", () => {
+                cfg.media_ids.push(m.id); renderChips();
+              });
+              availWrap.appendChild(chip);
+            });
+            if (!S.media.length) {
+              availWrap.insertAdjacentHTML("beforeend",
+                '<span class="muted">Erst <a href="/media">Medien hochladen</a>.</span>');
+            }
+          }
+          renderChips();
+          propsBox.append(chosenWrap, availWrap);
+
+          const secs = numInput(cfg.seconds ?? 8, 3, 120, (v) => { cfg.seconds = v; });
+          propsBox.appendChild(field("Wechsel alle (Sek.)", secs));
+        }
+
+        if (el.type === "qr") {
+          const srcSel = document.createElement("select");
+          srcSel.innerHTML = `
+            <option value="city_website" ${cfg.setting_key === "city_website" || !cfg.url ? "selected" : ""}>Stadt-Website (Einstellung)</option>
+            <option value="custom" ${cfg.url ? "selected" : ""}>Eigene URL</option>`;
+          const urlInp = document.createElement("input");
+          urlInp.placeholder = "https://…";
+          urlInp.value = cfg.url || "";
+          urlInp.disabled = !(cfg.url);
+          srcSel.addEventListener("change", () => {
+            const custom = srcSel.value === "custom";
+            urlInp.disabled = !custom;
+            if (!custom) { cfg.setting_key = "city_website"; cfg.url = ""; urlInp.value = ""; }
+            else { cfg.url = urlInp.value; }
+          });
+          urlInp.addEventListener("input", () => { cfg.url = urlInp.value.trim(); });
+          const labelInp = document.createElement("input");
+          labelInp.value = cfg.label || "";
+          labelInp.addEventListener("input", () => { cfg.label = labelInp.value; });
+          propsBox.append(field("Ziel", srcSel), field("URL (bei eigener)", urlInp),
+            field("Beschriftung", labelInp));
+        }
+
+        if (el.type === "events" || el.type === "announcements") {
+          const cnt = numInput(cfg.count ?? 5, 1, 12, (v) => { cfg.count = v; });
+          propsBox.appendChild(field("Anzahl Einträge", cnt));
+        }
+
+        const actions = document.createElement("p");
+        actions.style.cssText = "display:flex;gap:8px;margin-top:10px";
+        const del = document.createElement("button");
+        del.className = "btn danger small"; del.textContent = "Element löschen";
+        del.addEventListener("click", () => {
+          S.els.splice(S.sel, 1); select(-1); draw();
+        });
+        const dup = document.createElement("button");
+        dup.className = "btn secondary small"; dup.textContent = "Duplizieren";
+        dup.addEventListener("click", () => {
+          const copy = JSON.parse(JSON.stringify(el));
+          copy.x = clamp(copy.x + 2, 0, 100 - copy.w);
+          copy.y = clamp(copy.y + 2, 0, 100 - copy.h);
+          S.els.splice(S.sel + 1, 0, copy); select(S.sel + 1); draw();
+        });
+        actions.append(del, dup);
+        propsBox.appendChild(actions);
+      }
+
+      /* ── Palette ── */
+      $("palette").addEventListener("click", (e) => {
+        const btn = e.target.closest("[data-widget]");
+        if (!btn) return;
+        const type = btn.dataset.widget;
+        S.els.push({ type, ...JSON.parse(JSON.stringify(DEFAULTS[type])) });
+        select(S.els.length - 1);
+        draw();
+      });
+
+      /* ── Liste / Laden / Speichern ── */
+      function renderList() {
+        const list = $("layout-list");
+        list.innerHTML = S.layouts.map((l) => `
+          <tr data-id="${l.id}" class="${l.id === S.id ? "current" : ""}">
+            <td>${SB.esc(l.name)} ${l.is_default ? '<span class="badge ok">Standard</span>' : ""}
+                <div class="muted">${SB.esc(l.orientation)} · ${(l.elements || []).length} Elemente</div></td>
             <td style="white-space:nowrap">
               <button class="btn secondary small" data-load="${l.id}">Laden</button>
               ${l.is_default ? "" :
                 `<button class="btn secondary small" data-default="${l.id}">Standard</button>`}
               <button class="btn danger small" data-del="${l.id}">Löschen</button>
             </td></tr>`).join("");
-      };
+      }
 
-      const loadLayout = id => {
-        currentId = id;
-        const l = layouts.find(x => x.id === id);
+      function loadLayout(id) {
+        const l = S.layouts.find((x) => x.id === id);
         if (!l) return;
-        nameIn.value = l.name;
-        orientSel.value = l.orientation;
-        jsonTa.value = JSON.stringify(l.elements, null, 2);
-        renderList();
-        drawPreview();
-      };
+        S.id = id;
+        S.els = JSON.parse(JSON.stringify(l.elements || []));
+        S.sel = -1;
+        $("layout-name").value = l.name;
+        $("layout-orientation").value = l.orientation;
+        renderList(); draw(); buildProps();
+      }
 
-      list.addEventListener("click", async e => {
+      $("layout-list").addEventListener("click", async (e) => {
         const load = e.target.closest("[data-load]");
         const def = e.target.closest("[data-default]");
         const del = e.target.closest("[data-del]");
         try {
           if (load) loadLayout(Number(load.dataset.load));
           else if (def) {
-            const l = layouts.find(x => x.id === Number(def.dataset.default));
-            await this.api(`/api/admin/layouts/${l.id}`, {
+            const l = S.layouts.find((x) => x.id === Number(def.dataset.default));
+            await SB.api(`/api/admin/layouts/${l.id}`, {
               method: "PATCH",
-              body: { name: l.name, orientation: l.orientation, elements: l.elements,
-                is_default: true },
+              body: { name: l.name, orientation: l.orientation,
+                elements: l.elements, is_default: true },
             });
             await reloadAll();
-            this.toast("Standardlayout gesetzt");
+            SB.toast("Standardlayout gesetzt");
           } else if (del) {
             if (!confirm("Layout wirklich löschen?")) return;
-            await this.api(`/api/admin/layouts/${del.dataset.del}`, { method: "DELETE" });
-            if (currentId === Number(del.dataset.del)) currentId = null;
+            await SB.api(`/api/admin/layouts/${del.dataset.del}`, { method: "DELETE" });
+            if (S.id === Number(del.dataset.del)) { S.id = null; S.els = []; draw(); }
             await reloadAll();
           }
-        } catch (err) { this.toast(err.message, true); }
+        } catch (err) { SB.toast(err.message, true); }
       });
 
-      const reloadAll = async () => {
-        layouts = await this.api("/api/admin/layouts");
-        renderList();
-        if (currentId == null && layouts.length) loadLayout(layouts[0].id);
-      };
-
-      document.getElementById("layout-new").addEventListener("click", () => {
-        currentId = null;
-        nameIn.value = "Neues Layout";
-        jsonTa.value = "[]";
-        renderList();
-        drawPreview();
+      $("layout-new").addEventListener("click", () => {
+        S.id = null; S.els = []; S.sel = -1;
+        $("layout-name").value = "Neues Layout";
+        renderList(); draw(); buildProps();
       });
 
-      document.getElementById("layout-save").addEventListener("click", async () => {
-        const els = parseJson();
-        if (els === null) return;
-        const body = { name: nameIn.value.trim() || "Layout",
-          orientation: orientSel.value, elements: els,
-          is_default: layouts.find(l => l.id === currentId)?.is_default || false };
+      $("layout-save").addEventListener("click", async () => {
+        const name = $("layout-name").value.trim() || "Layout";
+        const current = S.layouts.find((l) => l.id === S.id);
+        const body = { name, orientation: $("layout-orientation").value,
+          elements: S.els, is_default: current?.is_default || false };
         try {
-          if (currentId) {
-            await this.api(`/api/admin/layouts/${currentId}`, { method: "PATCH", body });
+          if (S.id) {
+            await SB.api(`/api/admin/layouts/${S.id}`, { method: "PATCH", body });
           } else {
-            const res = await this.api("/api/admin/layouts", { method: "POST", body });
-            currentId = res.id;
+            const res = await SB.api("/api/admin/layouts", { method: "POST", body });
+            S.id = res.id;
           }
-          this.toast("Layout gespeichert");
+          SB.toast("Layout gespeichert");
           await reloadAll();
-        } catch (err) { this.toast(err.message, true); }
+        } catch (err) { SB.toast(err.message, true); }
       });
 
-      document.querySelectorAll("[data-widget]").forEach(btn => {
-        btn.addEventListener("click", () => {
-          const els = parseJson();
-          if (els === null) return;
-          els.push({ type: btn.dataset.widget, ...WIDGETS[btn.dataset.widget] });
-          jsonTa.value = JSON.stringify(els, null, 2);
-          drawPreview();
-        });
+      $("layout-orientation").addEventListener("change", draw);
+
+      /* ── JSON-Ansicht ── */
+      $("ed-json-details").addEventListener("toggle", () => {
+        if ($("ed-json-details").open) {
+          $("layout-json").value = JSON.stringify(S.els, null, 2);
+        }
+      });
+      $("ed-json-fill").addEventListener("click", () => {
+        $("layout-json").value = JSON.stringify(S.els, null, 2);
+      });
+      $("ed-json-import").addEventListener("click", () => {
+        try {
+          const parsed = JSON.parse($("layout-json").value);
+          if (!Array.isArray(parsed)) throw new Error("Array erwartet");
+          for (const el of parsed) {
+            if (!el.type || !DEFAULTS[el.type]) throw new Error(`Unbekannter Typ: ${el.type}`);
+            ["x", "y", "w", "h"].forEach((k) => { el[k] = Number(el[k]) || 0; });
+            el.config = el.config || {};
+          }
+          S.els = parsed; S.sel = -1; draw(); buildProps();
+          SB.toast("JSON übernommen");
+        } catch (err) { SB.toast("JSON-Fehler: " + err.message, true); }
       });
 
-      jsonTa.addEventListener("input", drawPreview);
-      orientSel.addEventListener("change", drawPreview);
+      async function reloadAll() {
+        [S.layouts, S.media] = await Promise.all([
+          SB.api("/api/admin/layouts"),
+          SB.api("/api/admin/media").catch(() => []),
+        ]);
+        renderList();
+        if (S.id == null && S.layouts.length) loadLayout(S.layouts[0].id);
+        else if (S.id != null) { const cur = S.layouts.find(l => l.id === S.id); if (cur) loadLayout(S.id); }
+        buildProps();
+      }
 
-      await reloadAll().catch(err => this.toast(err.message, true));
+      await reloadAll().catch((err) => SB.toast(err.message, true));
     },
-
     /* ── Zeitpläne ─────────────────────────────────────────────────────── */
     async pageSchedules() {
       let schedules = [], layouts = [];

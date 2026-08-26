@@ -15,7 +15,7 @@ set -Eeuo pipefail
 # ─────────────────────────── Variablen (anpassbar) ──────────────────────────
 APP="stadtdashboard"
 APP_NAME="StadtDashboard"
-VERSION="0.1.0"
+VERSION="0.2.0"
 
 REPO_URL="${REPO_URL:-https://github.com/HatchetMan111/StadtDashboard-CityBoard.git}"
 RAW_BASE="${RAW_BASE:-https://raw.githubusercontent.com/HatchetMan111/StadtDashboard-CityBoard/main}"

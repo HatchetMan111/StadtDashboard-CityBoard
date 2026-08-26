@@ -54,6 +54,8 @@ on_error() {
 trap 'on_error $? $LINENO "$BASH_COMMAND"' ERR
 
 export DEBIAN_FRONTEND=noninteractive
+# Keine Locale-Warnungen von apt/perl im Container-Log
+export LC_ALL=C LANG=C
 
 echo -e "${GN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${CL}"
 echo -e "${GN} ${APP_NAME} – Installation im Container${CL}"

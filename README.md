@@ -7,6 +7,8 @@ installierbar als Proxmox-LXC mit einem Einzeiler.
 - **Admin-Cockpit** – Inhalte, Layouts, Geräte, Zeitpläne, Backup
 - **Display-Frontend** – schlanke Vollbild-Ansicht für TV/Monitor/Signage-Player
 - **API/Backend** – FastAPI + SQLite, REST + WebSocket, keine externen Cloud-Dienste
+- **Drag-&-Drop-Layout-Editor** – Widgets auf die Fläche ziehen, skalieren,
+  Medien per Klick zuweisen (Galerie/Bild/QR)
 
 ---
 
@@ -45,10 +47,10 @@ Installationslog liegt im Container unter `/var/log/stadtdashboard-install.log`.
 | Schritt | Wo |
 |---|---|
 | Anmelden (`admin` / Initial-Passwort) | `http://LXC-IP:8080/` |
-| Passwort ändern | Einstellungen → Passwort |
+| Passwort ändern (Pflicht-Hinweis erscheint im Dashboard) | Einstellungen → Passwort |
 | Stadtname, Logo, Ticker, Wetter pflegen | Einstellungen |
 | Bekanntmachung mit Priorität + Gültigkeit anlegen | Bekanntmachungen |
-| Layout zusammenstellen (Widgets + JSON + Vorschau) | Layouts |
+| **Layout visuell bauen**: Widgets ziehen/skalieren, Medien zuweisen | Layouts |
 | Display koppeln: am Gerät `/display` öffnen → erscheint als „wartet“ → **Koppeln** | Displays |
 | Zeitgesteuerte Layouts (z. B. Nachtmodus 22–6 Uhr) | Zeitpläne |
 | Vollbild am TV: Browser im Kiosk-Modus auf `/display` | – |
@@ -113,14 +115,13 @@ Display-Browser ─┘        │              └─ REST (/api/display/*, /api
 
 Details: [docs/ARCHITEKTUR.md](docs/ARCHITEKTUR.md)
 
-## ✅ Verifikation (Stand 2026-08-25)
+## ✅ Verifikation
 
 ```
-pytest .................. 19 passed
-uvicorn Boot ............ healthz 200 · login 200 · display 200
-Smoke-Test E2E .......... Login → Bekanntmachung → Display registrieren →
-                          koppeln → State enthält Notfallmeldung ✓
-bash -n + shellcheck .... outer/inner Installer fehlerfrei
+pytest .................. 20 passed (inkl. Passwort-Lifecycle, Pairing, Scheduler)
+Installer-E2E ........... 5/5 (Stub-Proxmox: Create/Kollision/Update/404)
+uvicorn Boot ............ healthz/login/display/layouts 200 · Static 200
+bash -n + shellcheck .... outer/inner/e2e fehlerfrei
 ```
 
 Ein echter LXC-Durchlauf muss auf einem Proxmox-Host erfolgen:

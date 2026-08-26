@@ -80,6 +80,25 @@ def test_password_change(admin_client):
     assert login.status_code == 200
 
 
+def test_initial_password_lifecycle(admin_client):
+    """Initial-Passwort wird als aktiv gemeldet und nach Änderung entsorgt."""
+    from app import config
+
+    assert config.INITIAL_PW_FILE.exists()
+    status = admin_client.get("/api/admin/status").json()
+    assert status["initial_password_active"] is True
+    assert status["app"] == "StadtDashboard"
+
+    current = config.INITIAL_PW_FILE.read_text().strip()
+    resp = admin_client.put("/api/admin/password",
+                            json={"old": current, "new": "neues-sicheres-pw"})
+    assert resp.status_code == 200
+
+    assert not config.INITIAL_PW_FILE.exists()
+    status_after = admin_client.get("/api/admin/status").json()
+    assert status_after["initial_password_active"] is False
+
+
 # ── Display-Kopplung ────────────────────────────────────────────────────────
 def test_display_pairing_flow(admin_client):
     d = _register_display(admin_client)

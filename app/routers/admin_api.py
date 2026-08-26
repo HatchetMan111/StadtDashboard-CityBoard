@@ -92,7 +92,32 @@ def change_password(
         raise HTTPException(status_code=400, detail="Altes Passwort ist falsch")
     request_user.password_hash = hash_password(body.new)
     db.commit()
+    # Initial-Passwort-Datei entsorgen: Gilt ab jetzt als geaendert.
+    try:
+        config.INITIAL_PW_FILE.unlink(missing_ok=True)
+    except OSError as exc:
+        log.warning("Initial-Passwort-Datei konnte nicht entfernt werden: %s", exc)
+    log.info("admin.password_changed user=%s", request_user.username)
     return {"ok": True}
+
+
+@router.get("/status")
+def admin_status(
+    request_user: AdminUser = Depends(require_admin), db: Session = Depends(get_db)
+) -> dict:
+    """Bootstrap-Status: wird noch das Initial-Passwort verwendet?"""
+    initial_active = False
+    if config.INITIAL_PW_FILE.exists():
+        try:
+            initial_pw = config.INITIAL_PW_FILE.read_text().strip()
+            initial_active = verify_password(initial_pw, request_user.password_hash)
+        except OSError:
+            pass
+    return {
+        "app": config.APP_NAME,
+        "version": config.VERSION,
+        "initial_password_active": initial_active,
+    }
 
 
 # ── Displays ────────────────────────────────────────────────────────────────
