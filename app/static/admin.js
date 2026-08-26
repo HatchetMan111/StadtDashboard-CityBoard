@@ -647,17 +647,17 @@
           badge.className = "ed-badge";
           badge.textContent = `${ICONS[el.type] || "▫"} ${LABELS[el.type] || el.type}`;
           d.appendChild(badge);
-          if (i === S.sel) {
-            const h = document.createElement("span");
-            h.className = "ed-handle";
-            d.appendChild(h);
-            const del = document.createElement("button");
-            del.type = "button";
-            del.className = "ed-del";
-            del.title = "Widget löschen";
-            del.textContent = "✕";
-            d.appendChild(del);
-          }
+          // Griff + ✕ IMMER rendern; CSS zeigt sie nur bei .sel
+          // (select() togglet nur Klassen und ruft kein draw() auf!)
+          const h = document.createElement("span");
+          h.className = "ed-handle";
+          d.appendChild(h);
+          const del = document.createElement("button");
+          del.type = "button";
+          del.className = "ed-del";
+          del.title = "Widget löschen";
+          del.textContent = "✕";
+          d.appendChild(del);
           canvas.appendChild(d);
           positionEl(i);
         });
@@ -730,10 +730,16 @@
         ensureGuides();
         const v = canvas.querySelector(".ed-guide.v");
         const h = canvas.querySelector(".ed-guide.h");
+        if (!v || !h) return;
+        if (!el || !on) {          // auch bei null sauber verstecken (endDrag!)
+          v.style.display = "none";
+          h.style.display = "none";
+          return;
+        }
         const centerV = Math.abs((el.x + el.w / 2) - 50) < 1.2;
         const centerH = Math.abs((el.y + el.h / 2) - 50) < 1.2;
-        v.style.display = on && centerV ? "" : "none";
-        h.style.display = on && centerH ? "" : "none";
+        v.style.display = centerV ? "" : "none";
+        h.style.display = centerH ? "" : "none";
       }
 
       let drag = null;
@@ -749,6 +755,7 @@
         const target = e.target.closest(".ed-el");
         if (!target) { select(-1); return; }
         const i = Number(target.dataset.i);
+        const wasSelected = (S.sel === i);   // für Klick-auf-gewählt = fest setzen
         select(i);
         drag = {
           i,
@@ -757,6 +764,7 @@
           orig: { ...S.els[i] }, rect: canvas.getBoundingClientRect(),
           moved: false,
           snapshot: JSON.stringify(S.els),
+          wasSelected,
         };
         canvas.setPointerCapture(e.pointerId);
         e.preventDefault();
@@ -780,8 +788,14 @@
       });
       const endDrag = () => {
         if (!drag) return;
-        showGuides(null, false);
+        try {
+          showGuides(null, false);
+        } catch { /* Guides dürfen den Drag-Abschluss niemals blockieren */ }
         if (drag.moved) hist.push(drag.snapshot); // Undo-Punkt für diesen Zug
+        else if (drag.wasSelected) {
+          // Klick auf bereits gewähltes Widget ohne Bewegung → fest setzen
+          select(-1);
+        }
         drag = null;
       };
       canvas.addEventListener("pointerup", endDrag);
@@ -1064,8 +1078,10 @@
         const type = btn.dataset.widget;
         pushHistory();
         S.els.push({ type, ...JSON.parse(JSON.stringify(DEFAULTS[type])) });
-        select(S.els.length - 1);
+        // Bewusst NICHT selektieren: neue Widgets stehen sofort „fest“
+        // und werden bei Bedarf per Klick in den Bearbeitungsmodus genommen.
         draw();
+        SB.toast(`${LABELS[type] || type} hinzugefügt – zum Bearbeiten klicken`);
       });
 
       /* ── Liste / Laden / Speichern ── */

@@ -144,9 +144,14 @@ Details: [docs/ARCHITEKTUR.md](docs/ARCHITEKTUR.md)
 ```
 pytest .................. 40 passed (Widgets/RSS/Webcam-Gating, Rollen-Matrix,
                           ICS, Rate-Limit, Notifier, Scheduler, Backup …)
+Browser-E2E (Playwright). 2 passed – Editor-Flow im echten Chromium:
+                          Add→Klick→Drag→„fest setzen“→Entf/✕→Persistenz
 Installer-E2E ........... 5/5 (Stub-Proxmox: Create/Kollision/Update/404)
 bash -n + shellcheck .... outer/inner/e2e fehlerfrei
 ```
+
+Browser-Tests benötigen einmalig: `pip install -r requirements-dev.txt && playwright install chromium`
+
 
 Ein echter LXC-Durchlauf muss auf einem Proxmox-Host erfolgen:
 Installer starten → Reboot des CT → Web UI wieder erreichbar (systemd + `onboot: 1`).
