@@ -174,7 +174,22 @@
     clearDynamic();
 
     stage.className = state.layout.orientation === "portrait" ? "portrait" : "landscape";
+    const bg = (state.layout || {}).background || {};
+    stage.style.background =
+      bg.mode === "color" && bg.color ? bg.color : "#0b1220";
     stage.innerHTML = "";
+
+    // Hintergrundbild + Abdunkelung (damit Widgets lesbar bleiben)
+    if (bg.mode === "image" && bg.media_url) {
+      const img = document.createElement("img");
+      img.className = "bg-layer";
+      img.src = bg.media_url;
+      img.alt = "";
+      const dim = document.createElement("div");
+      dim.className = "bg-dim";
+      dim.style.opacity = String(Math.min(0.9, Math.max(0, Number(bg.dim) || 0)));
+      stage.append(img, dim);
+    }
 
     for (const el of state.layout.elements || []) {
       const node = buildWidget(el, state);

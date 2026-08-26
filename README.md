@@ -77,6 +77,28 @@ Das Display rendert **lokal im Browser**, cached den letzten Zustand in
 `localStorage` und läuft bei Netzausfall weiter (Uhr, Kalender, Bilder; Wetter wird
 als „ggf. veraltet“ markiert). Live-Updates kommen per WebSocket.
 
+## 🎨 Layout gestalten (geführt) & Vorlagen
+
+Neue Seite **„Layout gestalten“** – bewusst ohne Koordinaten:
+
+1. **Ziel-Layout wählen** – oder **„Neu aus Vorlage“**: 8 fertige Designs
+   (Standard, Tourismus, Rathaus-Info, Abendprogramm, Kamera-Fokus,
+   Willkommen, News-Kiosk, Info-Hochformat)
+2. **Kategorie wählen**: 🖼 Bild · 🎞 Bilder-Serie · 🎥 Kamera (RTSP-URL
+   direkt eingeben) · 🌐 Webseite (Link) · 📡 RSS · 📢 Bekanntmachungen ·
+   🎉 Veranstaltungen · 🌤 Wetter · 🕐 Uhr · 📅 Datum · 🏙 Kopf ·
+   📝 Text · 🔳 QR · 📰 Ticker
+3. **Nur die Felder ausfüllen, die die Kategorie braucht** (z. B. bei
+   Kamera: RTSP-URL + Beschriftung), Position als verständlichen Slot
+   wählen („Rechte Hälfte“, „Unterer Balken“ …) → hinzufügen →
+   **Live-Vorschau** öffnen
+
+Feinjustierung (freies Ziehen, Hintergrund) bleibt im klassischen Editor.
+
+### Hintergrund pro Layout
+Im Editor wählbar: **Farbe** oder **Bild mit Abdunkelung** (Prozent) –
+damit Widgets auf Fotos lesbar bleiben. Gilt für Display und Live-Vorschau.
+
 ### Widgets (V1)
 Kopf (Logo + Stadt) · Uhr · Datum · Wetter · Vorhersage · Text · Bild ·
 Bildergalerie · Veranstaltungen · Bekanntmachungen · QR-Code · Ticker ·
@@ -142,8 +164,8 @@ Details: [docs/ARCHITEKTUR.md](docs/ARCHITEKTUR.md)
 ## ✅ Verifikation
 
 ```
-pytest .................. 40 passed (Widgets/RSS/Webcam-Gating, Rollen-Matrix,
-                          ICS, Rate-Limit, Notifier, Scheduler, Backup …)
+pytest .................. 48 passed (Vorlagen, Add-Widget-Slots, Background-
+                          Roundtrip, Rollen-Matrix, ICS, Rate-Limit …)
 Browser-E2E (Playwright). 2 passed – Editor-Flow im echten Chromium:
                           Add→Klick→Drag→„fest setzen“→Entf/✕→Persistenz
 Installer-E2E ........... 5/5 (Stub-Proxmox: Create/Kollision/Update/404)

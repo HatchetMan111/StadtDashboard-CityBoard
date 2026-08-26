@@ -120,6 +120,7 @@
         announcements: () => this.pageAnnouncements(),
         events: () => this.pageEvents(),
         media: () => this.pageMedia(),
+        gestalten: () => this.pageGestalten(),
         layouts: () => this.pageLayouts(),
         schedules: () => this.pageSchedules(),
         settings: () => this.pageSettings(),
@@ -588,7 +589,8 @@
 
     /* ── Layouts: Drag-&-Drop-Editor ───────────────────────────────────── */
     async pageLayouts() {
-      const S = { layouts: [], id: null, els: [], sel: -1, media: [] };
+      const S = { layouts: [], id: null, els: [], sel: -1, media: [],
+                  bg: { mode: "color", color: "#0b1220", dim: 0.35 } };
       const $ = (id) => document.getElementById(id);
       const canvas = $("ed-canvas"), propsBox = $("ed-props");
       const ICONS = { header: "🏙", clock: "🕐", date: "📅", weather: "🌤",
@@ -662,6 +664,7 @@
           positionEl(i);
         });
         ensureGuides();
+        applyCanvasBg();
       }
 
       /* ── Historie (Undo) + Dirty-Marker ── */
@@ -1105,13 +1108,60 @@
         if (!l) return;
         S.id = id;
         S.els = JSON.parse(JSON.stringify(l.elements || []));
+        S.bg = { mode: "color", color: "#0b1220", dim: 0.35,
+                 ...(l.background || {}) };
         S.sel = -1;
         clearDirty();
         $("layout-name").value = l.name;
         $("layout-orientation").value = l.orientation;
+        syncBgControls();
         updatePreviewLinks();
         renderList(); draw(); buildProps();
       }
+
+      /* ── Hintergrund-Steuerung ── */
+      function syncBgControls() {
+        $("bg-mode").value = S.bg.mode || "color";
+        if (S.bg.color) $("bg-color").value = S.bg.color;
+        $("bg-dim").value = Math.round((S.bg.dim ?? 0.35) * 100);
+        $("bg-dim-val").textContent = Math.round((S.bg.dim ?? 0.35) * 100);
+        const isImg = $("bg-mode").value === "image";
+        $("bg-color").parentElement.classList.toggle("hidden", isImg);
+        $("bg-media-wrap").classList.toggle("hidden", !isImg);
+        $("bg-dim-wrap").classList.toggle("hidden", !isImg);
+        if (isImg) {
+          $("bg-media").innerHTML = `<option value="">– wählen –</option>` +
+            S.media.map((m) =>
+              `<option value="${m.id}" ${Number(S.bg.media_id) === m.id ? "selected" : ""}>${SB.esc(m.title)}</option>`).join("");
+        }
+        applyCanvasBg();
+      }
+      function applyCanvasBg() {
+        if (S.bg.mode === "image" && S.bg.media_id) {
+          const m = S.media.find((x) => x.id === Number(S.bg.media_id));
+          canvas.style.backgroundImage = m
+            ? `linear-gradient(rgba(0,0,0,${S.bg.dim ?? .35}),rgba(0,0,0,${S.bg.dim ?? .35})),url('${m.thumb_url || m.url}')`
+            : "";
+          canvas.style.backgroundColor = "#000";
+        } else {
+          canvas.style.backgroundImage = "";
+          canvas.style.background =
+            S.bg.mode === "color" && S.bg.color ? S.bg.color : "#0b1220";
+        }
+      }
+      $("bg-form").addEventListener("input", () => {
+        S.bg.mode = $("bg-mode").value;
+        S.bg.color = $("bg-color").value;
+        S.bg.dim = Number($("bg-dim").value) / 100;
+        $("bg-dim-val").textContent = $("bg-dim").value;
+        if ($("bg-media").value) S.bg.media_id = Number($("bg-media").value);
+        markDirty();
+        syncBgControls();
+      });
+      $("bg-media").addEventListener("change", () => {
+        S.bg.media_id = Number($("bg-media").value) || undefined;
+        markDirty(); applyCanvasBg();
+      });
 
       function updatePreviewLinks() {
         const frame = $("ed-preview-frame");
@@ -1174,8 +1224,10 @@
 
       $("layout-new").addEventListener("click", () => {
         S.id = null; S.els = []; S.sel = -1;
+        S.bg = { mode: "color", color: "#0b1220", dim: 0.35 };
         $("layout-name").value = "Neues Layout";
         clearDirty();
+        syncBgControls();
         updatePreviewLinks();
         renderList(); draw(); buildProps();
       });
@@ -1184,7 +1236,9 @@
         const name = $("layout-name").value.trim() || "Layout";
         const current = S.layouts.find((l) => l.id === S.id);
         const body = { name, orientation: $("layout-orientation").value,
-          elements: S.els, is_default: current?.is_default || false };
+          elements: S.els, is_default: current?.is_default || false,
+          background: { mode: S.bg.mode, color: S.bg.color,
+            media_id: S.bg.media_id ?? null, dim: S.bg.dim ?? 0.35 } };
         try {
           if (S.id) {
             await SB.api(`/api/admin/layouts/${S.id}`, { method: "PATCH", body });
@@ -1240,6 +1294,323 @@
 
       await reloadAll().catch((err) => SB.toast(err.message, true));
     },
+    /* ── Layout gestalten (geführt) ────────────────────────────────────── */
+    async pageGestalten() {
+      const $ = (id) => document.getElementById(id);
+      let layouts = [], media = [], presets = [];
+      let currentCat = null;
+
+      const CATS = [
+        { type: "image", icon: "🖼", label: "Bild",
+          desc: "Ein einzelnes Foto/Grafik", slot: "links",
+          fields: [{ key: "media_id", label: "Bild", kind: "media",
+                     required: true }] },
+        { type: "gallery", icon: "🎞", label: "Bilder-Serie",
+          desc: "Mehrere Bilder als Wechsel", slot: "rechts",
+          fields: [{ key: "media_ids", label: "Bilder (Klick-Reihenfolge)",
+                     kind: "media_multi" },
+                   { key: "seconds", label: "Wechsel alle (Sek.)",
+                     kind: "number", min: 3, max: 120, def: 8 }] },
+        { type: "webcam", icon: "🎥", label: "Kamera",
+          desc: "RTSP-Stream oder Bild-URL", slot: "rechts",
+          fields: [{ key: "mode", label: "Art", kind: "select", def: "rtsp",
+                     options: [["rtsp", "RTSP-Stream (Server holt Frames)"],
+                               ["snapshot", "Snapshot-Bild-URL"],
+                               ["mjpeg", "MJPEG-Stream"],
+                               ["hls", "HLS-Stream (.m3u8)"]] },
+                   { key: "url", label: "URL (rtsp://… bzw. https://…)",
+                     kind: "text",
+                     placeholder: "rtsp://user:pass@kamera.local/stream1" },
+                   { key: "refresh_seconds", label: "Aktualisierung (Sek.)",
+                     kind: "number", min: 5, max: 600, def: 30 },
+                   { key: "caption", label: "Beschriftung (optional)",
+                     kind: "text", def: "Live-Blick" }] },
+        { type: "website", icon: "🌐", label: "Webseite",
+          desc: "Seite einbetten (Link genügt)", slot: "mitte-gross",
+          fields: [{ key: "url", label: "Link zur Webseite", kind: "text",
+                     placeholder: "https://www.beispiel.de" },
+                   { key: "consent_param",
+                     label: "Cookie-/Consent-Parameter (optional)",
+                     kind: "text", placeholder: "cookie-consent=1" }] },
+        { type: "rss", icon: "📡", label: "RSS-Feed",
+          desc: "Schlagzeilen aus Feed", slot: "links",
+          fields: [{ key: "url", label: "Feed-URL", kind: "text",
+                     placeholder: "https://…/rss" },
+                   { key: "count", label: "Anzahl Zeilen", kind: "number",
+                     min: 1, max: 12, def: 5 }] },
+        { type: "announcements", icon: "📢", label: "Bekanntmachungen",
+          desc: "Zeigt Ihre gepflegten Meldungen", slot: "links",
+          fields: [{ key: "count", label: "Anzahl", kind: "number",
+                     min: 1, max: 12, def: 4 }] },
+        { type: "events", icon: "🎉", label: "Veranstaltungen",
+          desc: "Kommende Termine aus dem Kalender", slot: "rechts",
+          fields: [{ key: "count", label: "Anzahl", kind: "number",
+                     min: 1, max: 12, def: 5 }] },
+        { type: "weather", icon: "🌤", label: "Wetter",
+          desc: "Aktuelle Werte + Bedingung", slot: "oben-rechts", fields: [] },
+        { type: "forecast", icon: "🌦", label: "Wetter-Vorhersage",
+          desc: "3-Tage-Vorschau", slot: "oben-rechts", fields: [] },
+        { type: "clock", icon: "🕐", label: "Uhr", desc: "Große Uhrzeit",
+          slot: "oben-rechts", fields: [] },
+        { type: "date", icon: "📅", label: "Datum", desc: "Langes Datum",
+          slot: "oben-rechts", fields: [] },
+        { type: "header", icon: "🏙", label: "Kopf (Stadt + Logo)",
+          desc: "Logo und Stadtname", slot: "oben-links", fields: [] },
+        { type: "text", icon: "📝", label: "Text",
+          desc: "Freier Text/Hinweis", slot: "mitte-gross",
+          fields: [{ key: "text", label: "Text", kind: "textarea",
+                     def: "Willkommen!" }] },
+        { type: "qr", icon: "🔳", label: "QR-Code",
+          desc: "Stadt-Website oder eigener Link", slot: "rechts",
+          fields: [{ key: "_src", label: "Ziel", kind: "select_qr" },
+                   { key: "label", label: "Beschriftung", kind: "text",
+                     def: "Mehr erfahren" }] },
+        { type: "ticker", icon: "📰", label: "Ticker",
+          desc: "Laufband mit Ticker-Text", slot: "unten-band", fields: [] },
+      ];
+
+      const SLOT_LABELS = { "oben-links": "Oben links",
+        "oben-rechts": "Oben rechts", links: "Linke Hälfte",
+        rechts: "Rechte Hälfte", "mitte-gross": "Mitte (groß)",
+        "voll-bild": "Ganze Fläche", "unten-band": "Unterer Balken" };
+
+      /* ── Schritt 1: Layout & Vorlagen ── */
+      function renderLayoutOptions() {
+        $("g-layout").innerHTML = layouts.map((l) =>
+          `<option value="${l.id}">${SB.esc(l.name)}${l.is_default ? " (Standard)" : ""}</option>`).join("");
+      }
+
+      function renderPresets() {
+        $("g-presets").innerHTML = presets.map((p) => `
+          <button class="preset-card" data-preset="${p.id}"
+                  style="text-align:left;cursor:pointer;background:#fff;border:1px solid var(--border);border-radius:10px;padding:14px">
+            <strong>${SB.esc(p.name)}</strong>
+            <div class="muted">${p.orientation === "portrait" ? "📱 Hochformat" : "🖥 Querformat"} · ${p.widget_count} Widgets</div>
+            <div class="muted mt">${SB.esc(p.description)}</div>
+            <span class="btn small mt" style="pointer-events:none">Diese Vorlage nutzen</span>
+          </button>`).join("");
+      }
+
+      $("g-toggle-presets").addEventListener("click", () => {
+        $("g-presets").classList.toggle("hidden");
+      });
+      $("g-presets").addEventListener("click", async (e) => {
+        const card = e.target.closest("[data-preset]");
+        if (!card) return;
+        try {
+          const res = await SB.api("/api/admin/layouts/from-preset", {
+            method: "POST", body: { preset_id: card.dataset.preset } });
+          SB.toast(`Layout „${res.name}" erstellt`);
+          layouts = await SB.api("/api/admin/layouts");
+          renderLayoutOptions();
+          $("g-layout").value = String(res.id);
+        } catch (err) { SB.toast(err.message, true); }
+      });
+
+      /* ── Schritt 2: Kategorien ── */
+      function renderCats() {
+        $("g-cats").innerHTML = CATS.map((c) => `
+          <button class="cat-tile" data-cat="${c.type}"
+                  style="text-align:left;cursor:pointer;background:#fff;
+                  border:2px solid ${currentCat?.type === c.type ? "var(--accent)" : "var(--border)"};
+                  border-radius:10px;padding:12px">
+            <div style="font-size:26px">${c.icon}</div>
+            <strong>${c.label}</strong>
+            <div class="muted" style="font-size:12px">${c.desc}</div>
+          </button>`).join("");
+      }
+      renderCats();
+
+      /* ── Schritt 3: Formular ── */
+      function mediaSelect(multiple) {
+        const wrap = document.createElement("div");
+        wrap.dataset.kind = multiple ? "medias" : "media";
+        if (!media.length) {
+          wrap.innerHTML =
+            '<span class="muted">Noch keine Medien – <a href="/media">erst hochladen</a>.</span>';
+          return wrap;
+        }
+        if (!multiple) {
+          const sel = document.createElement("select");
+          sel.innerHTML = `<option value="">– wählen –</option>` +
+            media.map((m) =>
+              `<option value="${m.id}">${SB.esc(m.title)}</option>`).join("");
+          wrap.appendChild(sel);
+        } else {
+          const ids = new Set();
+          wrap.innerHTML = "<div class='chips'></div>";
+          const chips = wrap.querySelector(".chips");
+          const drawChips = () => {
+            chips.innerHTML = "";
+            media.forEach((m) => {
+              const on = ids.has(m.id);
+              const chip = document.createElement("span");
+              chip.className = "chip " + (on ? "" : "add");
+              chip.innerHTML =
+                `${on ? "✓" : "＋"} <img src="${m.thumb_url || m.url}">${SB.esc(m.title)}`;
+              chip.addEventListener("click", () => {
+                on ? ids.delete(m.id) : ids.add(m.id);
+                drawChips();
+              });
+              chips.appendChild(chip);
+            });
+          };
+          drawChips();
+          wrap.getValue = () => [...ids];
+        }
+        return wrap;
+      }
+
+      function buildForm(cat) {
+        const form = $("g-form");
+        // QR erzeugt einen Extra-URL-Block – deshalb immer neu starten
+        form.innerHTML = "";
+        for (const f of cat.fields) {
+          if (f.kind === "select_qr") {
+            const wrap = document.createElement("div");
+            wrap.className = "field"; wrap.dataset.key = "_src";
+            const lab = document.createElement("label");
+            lab.textContent = f.label;
+            const sel = document.createElement("select");
+            sel.dataset.qrsrc = "1";
+            sel.innerHTML = `
+              <option value="city_website">Stadt-Website (Einstellung)</option>
+              <option value="custom">Eigene URL</option>`;
+            sel.addEventListener("change", () => toggleQrUrl(sel.value));
+            wrap.append(lab, sel);
+            const urlWrap = document.createElement("div");
+            urlWrap.className = "field mt"; urlWrap.dataset.key = "url";
+            urlWrap.style.display = "none";
+            const ulab = document.createElement("label");
+            ulab.textContent = "URL";
+            const u = document.createElement("input");
+            u.placeholder = "https://…";
+            urlWrap.append(ulab, u);
+            form.append(wrap, urlWrap);
+            continue;
+          }
+          const wrap = document.createElement("div");
+          wrap.className = "field mt"; wrap.dataset.key = f.key;
+          const lab = document.createElement("label");
+          lab.textContent = f.label;
+          wrap.appendChild(lab);
+
+          if (f.kind === "media") {
+            wrap.appendChild(mediaSelect(false));
+          } else if (f.kind === "media_multi") {
+            const ms = mediaSelect(true);
+            wrap.appendChild(ms);
+          } else if (f.kind === "textarea") {
+            const ta = document.createElement("textarea");
+            ta.rows = 3; ta.value = f.def ?? "";
+            wrap.appendChild(ta);
+          } else if (f.kind === "select") {
+            const sel = document.createElement("select");
+            sel.innerHTML = f.options.map(([v, l]) =>
+              `<option value="${v}" ${f.def === v ? "selected" : ""}>${SB.esc(l)}</option>`).join("");
+            wrap.appendChild(sel);
+          } else if (f.kind === "number") {
+            const inp = document.createElement("input");
+            inp.type = "number";
+            inp.min = f.min ?? 0; inp.max = f.max ?? 9999;
+            inp.value = f.def ?? "";
+            wrap.appendChild(inp);
+          } else {
+            const inp = document.createElement("input");
+            inp.placeholder = f.placeholder || "";
+            inp.value = f.def ?? "";
+            wrap.appendChild(inp);
+          }
+          form.appendChild(wrap);
+        }
+        function toggleQrUrl(mode) {
+          const uw = form.querySelector('[data-key="url"]');
+          if (uw) uw.style.display = mode === "custom" ? "" : "none";
+        }
+        // Slot-Auswahl je Format
+        const selected = layouts.find((l) => String(l.id) === $("g-layout").value);
+        const portrait = selected?.orientation === "portrait";
+        const slots = portrait
+          ? ["oben-links", "oben-rechts", "links", "rechts", "mitte-gross",
+             "unten-band", "voll-bild"]
+          : Object.keys(SLOT_LABELS);
+        $("g-slot").innerHTML = slots.map((s) =>
+          `<option value="${s}" ${s === cat.slot ? "selected" : ""}>${SLOT_LABELS[s]}</option>`).join("");
+      }
+
+      $("g-cats").addEventListener("click", (e) => {
+        const tile = e.target.closest("[data-cat]");
+        if (!tile) return;
+        currentCat = CATS.find((c) => c.type === tile.dataset.cat);
+        renderCats();
+        $("g-form-title").textContent =
+          `${currentCat.icon} ${currentCat.label} – Angaben`;
+        $("g-form-panel").classList.remove("hidden");
+        buildForm(currentCat);
+        $("g-form-panel").scrollIntoView({ behavior: "smooth", block: "nearest" });
+      });
+
+      $("g-add").addEventListener("click", async () => {
+        if (!currentCat) return;
+        const layoutId = $("g-layout").value;
+        if (!layoutId) return SB.toast("Erst ein Layout in Schritt 1 wählen", true);
+        const cfg = {};
+        for (const wrap of $("g-form").querySelectorAll("[data-key]")) {
+          const key = wrap.dataset.key;
+          if (key === "url") continue;                 // nur bei QR relevant
+          const multi = wrap.querySelector("[data-kind='medias']");
+          if (multi && typeof multi.getValue === "function") {
+            cfg[key] = multi.getValue();
+            continue;
+          }
+          const inner = wrap.querySelector("input,select,textarea");
+          if (!inner) continue;
+          let val = inner.value;
+          if (inner.type === "number") {
+            val = val === "" ? undefined : Number(val);
+          }
+          if (val !== "" && val !== undefined) cfg[key] = val;
+        }
+        if (currentCat.type === "qr") {
+          const srcSel = $("g-form").querySelector("select[data-qrsrc]");
+          if (srcSel && srcSel.value === "custom") {
+            const u = $('g-form').querySelector('[data-key="url"] input');
+            if (u && u.value.trim()) {
+              cfg.url = u.value.trim();
+              delete cfg.setting_key;
+            }
+          } else {
+            cfg.setting_key = "city_website";
+          }
+        }
+        try {
+          const res = await SB.api(`/api/admin/layouts/${layoutId}/add-widget`, {
+            method: "POST",
+            body: { type: currentCat.type, config: cfg,
+                    slot: $("g-slot").value },
+          });
+          $("g-done-preview").href = res.preview_url;
+          $("g-done").classList.remove("hidden");
+          SB.toast(`${currentCat.label} hinzugefügt – ▶ Vorschau ansehen!`);
+        } catch (err) { SB.toast(err.message, true); }
+      });
+
+      $("g-done-more").addEventListener("click", () => {
+        $("g-done").classList.add("hidden");
+      });
+      $("g-layout").addEventListener("change", () => {
+        if (currentCat) buildForm(currentCat);  // Slot-Map ans Format anpassen
+      });
+
+      [layouts, media, presets] = await Promise.all([
+        SB.api("/api/admin/layouts"),
+        SB.api("/api/admin/media").catch(() => []),
+        SB.api("/api/admin/layout-presets"),
+      ]);
+      renderLayoutOptions();
+      renderPresets();
+    },
+
     /* ── Zeitpläne ─────────────────────────────────────────────────────── */
     async pageSchedules() {
       let schedules = [], layouts = [];

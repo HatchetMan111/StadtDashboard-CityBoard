@@ -203,6 +203,19 @@ def build_state(db: Session, display: Display | None = None) -> dict:
     announcements = active_announcements(db, now)
     emergency = [a for a in announcements if a.priority >= 4]
 
+    # Hintergrund auflösen (Farbe oder Bild mit Abdunkelung)
+    bg_in = dict(getattr(layout, "background", None) or {})
+    background = {"mode": bg_in.get("mode", "color"), "color": bg_in.get("color", "")}
+    if background["mode"] == "image" and bg_in.get("media_id"):
+        item = db.get(MediaItem, bg_in["media_id"])
+        if item:
+            background["media_url"] = media_url(item)
+            background["thumb_url"] = f"/media/{item.id}/thumb"
+        else:
+            background["mode"] = "color"
+            background["color"] = "#0b1220"
+    background["dim"] = float(bg_in.get("dim", 0.35))
+
     state = {
         "app": config.APP_NAME,
         "version_server": config.VERSION,
@@ -237,6 +250,7 @@ def build_state(db: Session, display: Display | None = None) -> dict:
             "id": layout.id if layout else None,
             "name": layout.name if layout else "",
             "orientation": layout.orientation if layout else "landscape",
+            "background": background,
             "elements": resolve_elements(db, layout.elements) if layout else [],
         },
     }

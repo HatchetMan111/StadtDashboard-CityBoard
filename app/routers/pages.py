@@ -52,6 +52,7 @@ PAGES = {
     "/announcements": ("announcements.html", False),
     "/events": ("events.html", False),
     "/media": ("media.html", False),
+    "/gestalten": ("gestalten.html", False),
     "/layouts": ("layouts.html", True),
     "/schedules": ("schedules.html", True),
     "/settings": ("settings.html", True),

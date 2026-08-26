@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Layout gestalten · {{ app_name }}{% endblock %}
+{% block page %}gestalten{% endblock %}
+{% block content %}
+<h1>Layout gestalten</h1>
+<p class="subtitle">In drei Schritten zum Display-Inhalt – ohne Koordinaten.</p>
+
+<!-- Schritt 1 -->
+<div class="panel">
+  <h2>Schritt 1 · Ziel-Layout wählen</h2>
+  <div class="inline" style="align-items:center">
+    <span class="field" style="flex:1"><label>Aktives Layout</label>
+      <select id="g-layout"></select></span>
+    <button class="btn secondary" id="g-toggle-presets" type="button">
+      ➕ Neu aus Vorlage …
+    </button>
+    <a class="btn secondary" id="g-open-editor" href="/layouts" target="_blank"
+       rel="noopener">Im Editor öffnen ↗</a>
+  </div>
+  <div id="g-presets" class="hidden mt" style="display:grid;
+       grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px"></div>
+</div>
+
+<!-- Schritt 2 -->
+<div class="panel">
+  <h2>Schritt 2 · Was soll aufs Display?</h2>
+  <div id="g-cats" style="display:grid;
+       grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px"></div>
+</div>
+
+<!-- Schritt 3 -->
+<div class="panel hidden" id="g-form-panel">
+  <h2 id="g-form-title">Angaben</h2>
+  <form onsubmit="return false" id="g-form"></form>
+  <div class="inline mt" style="align-items:flex-end">
+    <span class="field"><label>Position</label>
+      <select id="g-slot"></select></span>
+    <button class="btn" id="g-add" type="button">Zum Layout hinzufügen</button>
+  </div>
+  <div id="g-done" class="hidden mt" style="background:#dcfce7;border-radius:10px;padding:12px 16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+    ✅ Hinzugefügt.
+    <a class="btn small" id="g-done-preview" target="_blank" rel="noopener">▶ Live-Vorschau</a>
+    <a class="btn secondary small" id="g-done-editor" href="/layouts" target="_blank" rel="noopener">Im Editor feinjustieren ↗</a>
+    <button class="btn secondary small" id="g-done-more" type="button">Weiteres hinzufügen</button>
+  </div>
+</div>
+
+<div id="toast"></div>
+<script src="/static/admin.js"></script>
+<script>SB.initPage();</script>
+{% endblock %}

@@ -49,6 +49,7 @@ class Layout(Base):
     name: Mapped[str] = mapped_column(String(120))
     orientation: Mapped[str] = mapped_column(String(12), default="landscape")
     elements: Mapped[list] = mapped_column(JSON, default=list)
+    background: Mapped[dict] = mapped_column(JSON, default=dict)
     is_default: Mapped[bool] = mapped_column(Boolean, default=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 

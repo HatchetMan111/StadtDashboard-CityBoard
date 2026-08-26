@@ -17,10 +17,13 @@
       <a href="/events" data-nav="events">Veranstaltungen</a>
       <a href="/media" data-nav="media">Medien</a>
       {% if role != 'editor' %}
+      <a href="/gestalten" data-nav="gestalten">Layout gestalten</a>
       <a href="/layouts" data-nav="layouts">Layouts</a>
       <a href="/schedules" data-nav="schedules">Zeitpläne</a>
       <a href="/settings" data-nav="settings">Einstellungen</a>
       <a href="/datenschutz" data-nav="datenschutz">Datenschutz</a>
+      {% else %}
+      <a href="/gestalten" data-nav="gestalten">Layout gestalten</a>
       {% endif %}
       <a href="/konto" data-nav="konto">Konto</a>
     </nav>

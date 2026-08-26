@@ -69,6 +69,27 @@
     </div>
 
     <div class="panel">
+      <h2>Hintergrund</h2>
+      <form id="bg-form" class="inline" onsubmit="return false">
+        <span class="field"><label>Art</label>
+          <select id="bg-mode">
+            <option value="color">Farbe</option>
+            <option value="image">Bild</option>
+          </select></span>
+        <span class="field"><label>Farbe</label>
+          <input type="color" id="bg-color" value="#0b1220"></span>
+        <span class="field hidden" id="bg-media-wrap"><label>Bild</label>
+          <select id="bg-media"></select></span>
+        <span class="field hidden" id="bg-dim-wrap"><label>Abdunkeln
+          (<span id="bg-dim-val">35</span> %)</label>
+          <input type="range" min="0" max="90" step="5" value="35"
+                 id="bg-dim" style="width:140px"></span>
+      </form>
+      <p class="muted mt">Bild-Hintergründe werden automatisch abgedunkelt,
+         damit Widgets lesbar bleiben.</p>
+    </div>
+
+    <div class="panel">
       <div id="ed-canvas" class="preview-box ed-canvas"></div>
     </div>
 

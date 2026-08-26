@@ -721,6 +721,7 @@ class LayoutIn(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     orientation: str = "landscape"
     elements: list[LayoutElement] = []
+    background: dict = {}
     is_default: bool = False
 
 
@@ -729,7 +730,7 @@ def list_layouts(db: Session = Depends(get_db), _u=Depends(require_admin)) -> li
     return [
         {
             **{k: getattr(l, k) for k in ("id", "name", "orientation", "elements",
-                                          "is_default")},
+                                          "is_default", "background")},
             "updated_at": l.updated_at.isoformat(timespec="seconds"),
         }
         for l in db.query(Layout).order_by(Layout.id.asc()).all()
@@ -764,6 +765,7 @@ async def create_layout(
     l_ = Layout(
         name=body.name, orientation=body.orientation,
         elements=[e.model_dump() for e in body.elements],
+        background=body.background or {},
     )
     if body.is_default:
         db.query(Layout).update({Layout.is_default: False})
@@ -772,6 +774,98 @@ async def create_layout(
     db.commit()
     await notify_displays()
     return {"id": l_.id}
+
+
+# ── Vorlagen & geführtes Hinzufügen (Layout gestalten) ─────────────────────
+@router.get("/layout-presets")
+def list_presets(_u=Depends(require_admin)) -> list[dict]:
+    """Statische Vorlagen aus dem Code – ohne Elemente für schlanke Antworten."""
+    from ..layout_presets import PRESETS
+
+    return [
+        {k: p[k] for k in ("id", "name", "description", "orientation",
+                           "background")}
+        | {"widget_count": len(p["elements"])}
+        for p in PRESETS
+    ]
+
+
+class FromPresetIn(BaseModel):
+    preset_id: str
+    name: str | None = Field(default=None, max_length=120)
+
+
+@router.post("/layouts/from-preset")
+async def create_from_preset(
+    body: FromPresetIn, db: Session = Depends(get_db),
+    _u=Depends(require_full_admin),
+) -> dict:
+    """Neues Layout aus einer Vorlage erstellen."""
+    from ..layout_presets import preset_layout_copy
+
+    try:
+        data = preset_layout_copy(body.preset_id, body.name)
+    except KeyError:
+        raise HTTPException(status_code=404,
+                            detail=f"Unbekannte Vorlage: {body.preset_id}")
+    l_ = Layout(**data)
+    db.add(l_)
+    db.commit()
+    await notify_displays()
+    return {"id": l_.id, "name": l_.name}
+
+
+class AddWidgetIn(BaseModel):
+    type: str
+    config: dict = {}
+    slot: str = "rechts"
+
+    @field_validator("type")
+    @classmethod
+    def known_type(cls, v: str) -> str:
+        if v not in WIDGET_TYPES:
+            raise ValueError(f"Unbekannter Widget-Typ: {v}")
+        return v
+
+
+@router.post("/layouts/{item_id}/add-widget")
+async def add_widget(
+    item_id: int, body: AddWidgetIn,
+    db: Session = Depends(get_db), _u=Depends(require_admin),
+) -> dict:
+    """Geführtes Hinzufügen ('Layout gestalten'): Widget mit Slot-Position
+    ans Layout anhängen. Bewusst für Redakteure offen – das ist der
+    Inhalts-Pfad ohne klassischen Editor."""
+    from ..layout_presets import WIDGET_DEFAULTS, slot_rect
+
+    l_ = db.get(Layout, item_id)
+    if not l_:
+        raise HTTPException(status_code=404, detail="Layout nicht gefunden")
+
+    base = json.loads(json.dumps(WIDGET_DEFAULTS.get(body.type, {"config": {}})))
+    cfg = {**base.get("config", {}), **(body.config or {})}
+    x, y, w, h = slot_rect(body.slot, l_.orientation)
+
+    # Stapeln: Ziel-Slot suchen, der nicht exakt belegt ist (Schrittweite 5 %)
+    els = json.loads(json.dumps(l_.elements or []))
+    max_y = max(0, 100 - h)
+    yy = min(y, max_y)
+    while any(int(e.get("x", 0)) == int(x) and int(e.get("y", 0)) == int(yy)
+              for e in els) and yy < max_y:
+        yy = min(yy + 5, max_y)
+    y = yy
+
+    element = {"type": body.type, "x": x, "y": y, "w": w, "h": h, "config": cfg}
+    els.append(element)
+    l_.elements = els
+    db.commit()
+    await notify_displays()
+    log.info("layout.add_widget layout=%s type=%s slot=%s",
+             item_id, body.type, body.slot)
+    return {
+        "ok": True, "element": element,
+        "preview_url": f"/display?preview={l_.id}",
+    }
 
 
 @router.patch("/layouts/{item_id}")
@@ -787,6 +881,7 @@ async def update_layout(
     l_.name = body.name
     l_.orientation = body.orientation
     l_.elements = [e.model_dump() for e in body.elements]
+    l_.background = body.background or {}
     if body.is_default and not l_.is_default:
         db.query(Layout).update({Layout.is_default: False})
         l_.is_default = True
@@ -827,6 +922,7 @@ async def duplicate_layout(
     copy = Layout(
         name=f"{l_.name} (Kopie)", orientation=l_.orientation,
         elements=json.loads(json.dumps(l_.elements or [])), is_default=False,
+        background=json.loads(json.dumps(l_.background or {})),
     )
     db.add(copy)
     db.commit()

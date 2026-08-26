@@ -59,6 +59,8 @@ def init_db() -> None:
     migrations = [
         # 0.3.0: Rollen für Admin-Benutzer
         "ALTER TABLE admin_users ADD COLUMN role VARCHAR(20) NOT NULL DEFAULT 'admin'",
+        # 0.5.0: Hintergrund pro Layout
+        "ALTER TABLE layouts ADD COLUMN background TEXT NOT NULL DEFAULT '{}'",
     ]
     with engine.begin() as conn:
         for stmt in migrations:
