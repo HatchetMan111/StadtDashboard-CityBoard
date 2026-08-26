@@ -8,6 +8,8 @@ import json
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
+from urllib.parse import urlparse
+
 from sqlalchemy.orm import Session
 
 from .. import config
@@ -15,6 +17,30 @@ from ..models import Announcement, Display, Event, Layout, MediaItem, Schedule
 from ..seed import get_setting
 from . import weather as weather_svc
 from .qrcode_svc import qr_data_url
+
+
+def _is_local_url(url: str) -> bool:
+    """LAN-Adressen gelten als lokal – für Kameras/Intranet-Seiten gedacht."""
+    try:
+        host = (urlparse(url).hostname or "").lower()
+    except ValueError:
+        return False
+    if not host:
+        return False
+    if host in ("localhost",) or host.endswith(
+            (".local", ".lan", ".internal", ".box", ".home", ".corp")):
+        return True
+    parts = host.split(".")
+    if len(parts) == 4 and all(p.isdigit() for p in parts):
+        a, b = int(parts[0]), int(parts[1])
+        if a == 10 or a == 127 or (a == 192 and b == 168) \
+                or (a == 172 and 16 <= b <= 31):
+            return True
+    return False
+
+
+def _external_allowed(db) -> bool:
+    return get_setting(db, "allow_external", "false") == "true"
 
 
 def now_local() -> datetime:
@@ -129,6 +155,37 @@ def resolve_elements(db: Session, elements: list[dict]) -> list[dict]:
             if url and url.startswith(("http://", "https://", "mailto:", "/")):
                 cfg["resolved_url"] = url
                 cfg["qr_image"] = qr_data_url(url)
+
+        if etype == "webcam":
+            mode = cfg.get("mode", "snapshot")
+            url = (cfg.get("url") or "").strip()
+            if mode == "rtsp" and url.startswith("rtsp://"):
+                from .webcam import cam_path
+
+                path = cam_path(url)
+                cfg["resolved_url"] = f"/webcam/{cam_key(url)}.jpg" if path.is_file() else ""
+            else:
+                if url and not _is_local_url(url) and not _external_allowed(db):
+                    cfg["blocked"] = True
+                    cfg["resolved_url"] = ""
+                else:
+                    cfg["resolved_url"] = url
+
+        if etype == "website":
+            url = (cfg.get("url") or "").strip()
+            if url and not _is_local_url(url) and not _external_allowed(db):
+                cfg["blocked"] = True
+
+        if etype == "rss":
+            from . import rss as rss_svc
+
+            feed = rss_svc.fetch_items(
+                db, (cfg.get("url") or "").strip(),
+                refresh_minutes=int(cfg.get("refresh_minutes") or 15),
+                count=int(cfg.get("count") or 6),
+            )
+            cfg["items"] = feed["items"]
+            cfg["stale"] = feed["stale"]
 
         if etype == "header":
             logo_id = get_setting(db, "logo_media_id", "")

@@ -40,6 +40,31 @@
       setTimeout(() => t.remove(), 4200);
     },
 
+    /* Clipboard mit Fallback: navigator.clipboard gibt es nur in Secure
+       Contexts (HTTPS/localhost) – im LAN per http also execCommand. */
+    async copyText(text) {
+      try {
+        if (navigator.clipboard && window.isSecureContext) {
+          await navigator.clipboard.writeText(text);
+          return true;
+        }
+      } catch { /* fällt durch zum Fallback */ }
+      try {
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.cssText = "position:fixed;top:0;left:0;opacity:0";
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        ta.setSelectionRange(0, text.length);
+        const ok = document.execCommand("copy");
+        ta.remove();
+        return ok;
+      } catch {
+        return false;
+      }
+    },
+
     esc(s) {
       return String(s ?? "").replace(/[&<>"']/g,
         c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -210,12 +235,16 @@
       document.getElementById("display-url").textContent = displayUrl;
       document.getElementById("copy-display-url").addEventListener("click",
         async () => {
-          try {
-            await navigator.clipboard.writeText(displayUrl);
+          const ok = await this.copyText(displayUrl);
+          if (ok) {
             this.toast("Anzeige-URL kopiert");
-          } catch {
-            this.toast("Kopieren nicht möglich – URL manuell markieren", true);
+            return;
           }
+          // Letzter Fallback: manuelles Markieren im Dialog
+          const typed = prompt(
+            "Automatisches Kopieren wird von diesem Browser blockiert.\n" +
+            "Bitte URL markieren und Strg+C drücken:", displayUrl);
+          if (typed !== null) this.toast("URL angezeigt – bitte manuell kopieren");
         });
 
       let layouts = [], schedules = [];
@@ -564,11 +593,13 @@
       const canvas = $("ed-canvas"), propsBox = $("ed-props");
       const ICONS = { header: "🏙", clock: "🕐", date: "📅", weather: "🌤",
         forecast: "🌦", text: "📝", image: "🖼", gallery: "🎞",
-        events: "🎉", announcements: "📢", qr: "🔳", ticker: "📰" };
+        events: "🎉", announcements: "📢", qr: "🔳", ticker: "📰",
+        webcam: "🎥", website: "🌐", rss: "📡" };
       const LABELS = { header: "Kopf", clock: "Uhr", date: "Datum",
         weather: "Wetter", forecast: "Vorhersage", text: "Text",
         image: "Bild", gallery: "Galerie", events: "Veranstaltungen",
-        announcements: "Bekanntmachungen", qr: "QR-Code", ticker: "Ticker" };
+        announcements: "Bekanntmachungen", qr: "QR-Code", ticker: "Ticker",
+        webcam: "Kamera", website: "Webseite", rss: "RSS-Feed" };
       const DEFAULTS = {
         header: { x: 3, y: 3, w: 40, h: 11, config: {} },
         clock: { x: 68, y: 3, w: 15, h: 11, config: {} },
@@ -584,6 +615,13 @@
         qr: { x: 77, y: 65, w: 20, h: 19,
               config: { setting_key: "city_website", url: "", label: "Mehr erfahren" } },
         ticker: { x: 0, y: 91, w: 100, h: 9, config: {} },
+        webcam: { x: 60, y: 40, w: 36, h: 34,
+                  config: { mode: "snapshot", url: "", refresh_seconds: 30,
+                            caption: "Live-Blick" } },
+        website: { x: 20, y: 20, w: 60, h: 55,
+                   config: { url: "", consent_param: "" } },
+        rss: { x: 3, y: 17, w: 30, h: 50,
+               config: { url: "", count: 5, refresh_minutes: 15 } },
       };
       const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
@@ -613,6 +651,12 @@
             const h = document.createElement("span");
             h.className = "ed-handle";
             d.appendChild(h);
+            const del = document.createElement("button");
+            del.type = "button";
+            del.className = "ed-del";
+            del.title = "Widget löschen";
+            del.textContent = "✕";
+            d.appendChild(del);
           }
           canvas.appendChild(d);
           positionEl(i);
@@ -620,12 +664,35 @@
         ensureGuides();
       }
 
-      /* ── Historie (Undo) ── */
+      /* ── Historie (Undo) + Dirty-Marker ── */
+      let dirty = false;
+      const markDirty = () => {
+        dirty = true;
+        $("ed-dirty").classList.remove("hidden");
+      };
+      const clearDirty = () => {
+        dirty = false;
+        $("ed-dirty").classList.add("hidden");
+      };
+      window.addEventListener("beforeunload", (e) => {
+        if (!dirty) return;
+        e.preventDefault();
+        e.returnValue = "";
+      });
+
       const hist = [];
       const pushHistory = () => {
         hist.push(JSON.stringify(S.els));
         if (hist.length > 50) hist.shift();
+        markDirty();
       };
+      function deleteSelected() {
+        if (S.sel < 0) return;
+        pushHistory();
+        S.els.splice(S.sel, 1);
+        select(-1);
+        draw();
+      }
       const undo = () => {
         if (!hist.length) return SB.toast("Nichts zum Rückgängigmachen");
         S.els = JSON.parse(hist.pop());
@@ -634,10 +701,13 @@
       };
       $("ed-undo").addEventListener("click", undo);
       document.addEventListener("keydown", (e) => {
+        const t = e.target;
+        if (t && /^(input|textarea|select)$/i.test(t.tagName)) return;
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
-          const t = e.target;
-          if (t && /^(input|textarea|select)$/i.test(t.tagName)) return;
           e.preventDefault(); undo();
+        } else if ((e.key === "Delete" || e.key === "Backspace") && S.sel >= 0) {
+          e.preventDefault();
+          deleteSelected();
         }
       });
 
@@ -668,6 +738,14 @@
 
       let drag = null;
       canvas.addEventListener("pointerdown", (e) => {
+        // ✕ am gewählten Widget: direkt löschen, kein Drag starten
+        const delBtn = e.target.closest(".ed-del");
+        if (delBtn) {
+          e.stopPropagation();
+          e.preventDefault();
+          deleteSelected();
+          return;
+        }
         const target = e.target.closest(".ed-el");
         if (!target) { select(-1); return; }
         const i = Number(target.dataset.i);
@@ -865,6 +943,83 @@
           propsBox.appendChild(field("Anzahl Einträge", cnt));
         }
 
+        if (el.type === "webcam") {
+          const modeSel = document.createElement("select");
+          modeSel.innerHTML = `
+            <option value="snapshot" ${cfg.mode === "snapshot" ? "selected" : ""}>Snapshot (Bild-URL, aktualisiert sich)</option>
+            <option value="mjpeg" ${cfg.mode === "mjpeg" ? "selected" : ""}>MJPEG-Stream (URL)</option>
+            <option value="hls" ${cfg.mode === "hls" ? "selected" : ""}>HLS-Stream (.m3u8)</option>
+            <option value="rtsp" ${cfg.mode === "rtsp" ? "selected" : ""}>RTSP-Kamera (Server holt Einzelframes)</option>`;
+          modeSel.addEventListener("change", () => { cfg.mode = modeSel.value; });
+          propsBox.appendChild(field("Modus", modeSel));
+
+          const urlInp = document.createElement("input");
+          urlInp.placeholder = modeSel.value === "rtsp"
+            ? "rtsp://user:pass@kamera.local/stream1"
+            : "https://…";
+          urlInp.value = cfg.url || "";
+          urlInp.addEventListener("change", () => { cfg.url = urlInp.value.trim(); pushHistory(); });
+          propsBox.appendChild(field("Quell-URL", urlInp));
+
+          const refresh = numInput(cfg.refresh_seconds ?? 30, 5, 600,
+            (v) => { cfg.refresh_seconds = v; }, pushHistory);
+          propsBox.appendChild(field("Aktualisierung (Sek., snapshot/rtsp)", refresh));
+
+          const cap = document.createElement("input");
+          cap.value = cfg.caption || "";
+          cap.addEventListener("change", () => { cfg.caption = cap.value; pushHistory(); });
+          propsBox.appendChild(field("Beschriftung (z. B. „Live-Blick Marktplatz“)", cap));
+
+          propsBox.insertAdjacentHTML("beforeend",
+            `<p class="muted">RTSP: Der Server zieht alle 60 s ein Einzelbild per ffmpeg
+              (datenschutzfreundlich, kein Dauersream). Erfordert ffmpeg im Container –
+              im Installer enthalten.</p>`);
+        }
+
+        if (el.type === "website") {
+          const urlInp = document.createElement("input");
+          urlInp.placeholder = "https://www.beispiel.de";
+          urlInp.value = cfg.url || "";
+          urlInp.addEventListener("change", () => {
+            cfg.url = urlInp.value.trim(); pushHistory();
+          });
+          propsBox.appendChild(field("Webseiten-URL", urlInp));
+
+          const consent = document.createElement("input");
+          consent.placeholder = 'z. B. "cookie-consent=1" (seitenspezifisch)';
+          consent.value = cfg.consent_param || "";
+          consent.addEventListener("change", () => {
+            cfg.consent_param = consent.value.trim(); pushHistory();
+          });
+          propsBox.appendChild(field("Consent-/Cookie-Parameter (an URL angehängt)", consent));
+
+          propsBox.insertAdjacentHTML("beforeend", `<p class="muted">
+            Wichtig: Die Seite muss Einbetten erlauben (keine X-Frame-Options-Sperre).
+            Cookie-Banner können viele Seiten über einen URL-Parameter akzeptieren –
+            das ist seitenspezifisch und kann hier hinterlegt werden. Öffentliche
+            (nicht-lokale) Seiten werden nur geladen, wenn „Externe Dienste erlauben“
+            aktiviert ist.</p>`);
+        }
+
+        if (el.type === "rss") {
+          const urlInp = document.createElement("input");
+          urlInp.placeholder = "https://www.stadt.de/news/rss";
+          urlInp.value = cfg.url || "";
+          urlInp.addEventListener("change", () => { cfg.url = urlInp.value.trim(); pushHistory(); });
+          propsBox.appendChild(field("Feed-URL (RSS/Atom)", urlInp));
+
+          const cnt = numInput(cfg.count ?? 5, 1, 12, (v) => { cfg.count = v; }, pushHistory);
+          propsBox.appendChild(field("Anzahl Schlagzeilen", cnt));
+
+          const mins = numInput(cfg.refresh_minutes ?? 15, 5, 240,
+            (v) => { cfg.refresh_minutes = v; }, pushHistory);
+          propsBox.appendChild(field("Abrufintervall (Minuten)", mins));
+
+          propsBox.insertAdjacentHTML("beforeend", `<p class="muted">
+            Benötigt „Externe Dienste erlauben“ (Einstellungen → Datenschutz);
+            ohne Freigabe bleibt das Widget leer. Cache reduziert Abrufe.</p>`);
+        }
+
         const actions = document.createElement("p");
         actions.style.cssText = "display:flex;gap:8px;margin-top:10px;flex-wrap:wrap";
 
@@ -881,13 +1036,13 @@
             if (S.sel >= S.els.length - 1) return;
             pushHistory();
             [S.els[S.sel], S.els[S.sel + 1]] = [S.els[S.sel + 1], S.els[S.sel]];
-            S.sel += 1; draw();
+            S.sel += 1; draw(); buildProps();
           }),
           mkBtn("Nach hinten ⬇", "secondary", () => {
             if (S.sel <= 0) return;
             pushHistory();
             [S.els[S.sel - 1], S.els[S.sel]] = [S.els[S.sel], S.els[S.sel - 1]];
-            S.sel -= 1; draw();
+            S.sel -= 1; draw(); buildProps();
           }),
           mkBtn("Duplizieren", "secondary", () => {
             pushHistory();
@@ -897,11 +1052,7 @@
             S.els.splice(S.sel + 1, 0, copy);
             select(S.sel + 1); draw();
           }),
-          mkBtn("Löschen", "danger", () => {
-            pushHistory();
-            S.els.splice(S.sel, 1);
-            select(-1); draw();
-          }),
+          mkBtn("Löschen", "danger", () => deleteSelected()),
         );
         propsBox.appendChild(actions);
       }
@@ -939,6 +1090,7 @@
         S.id = id;
         S.els = JSON.parse(JSON.stringify(l.elements || []));
         S.sel = -1;
+        clearDirty();
         $("layout-name").value = l.name;
         $("layout-orientation").value = l.orientation;
         updatePreviewLinks();
@@ -1007,6 +1159,7 @@
       $("layout-new").addEventListener("click", () => {
         S.id = null; S.els = []; S.sel = -1;
         $("layout-name").value = "Neues Layout";
+        clearDirty();
         updatePreviewLinks();
         renderList(); draw(); buildProps();
       });
@@ -1024,6 +1177,7 @@
             S.id = res.id;
           }
           SB.toast("Layout gespeichert");
+          clearDirty();
           updatePreviewLinks();   // iframe auf gespeicherte Version reloaden
           const frame = $("ed-preview-frame");
           if (frame && S.id) { frame.src = `/display?preview=${S.id}`; }

@@ -22,6 +22,20 @@ router = APIRouter(tags=["display"])
 log = logging.getLogger("stadtdashboard.display")
 
 
+@router.get("/webcam/{key}.jpg")
+def webcam_frame(key: str):
+    """Liefert den letzten RTSP-Schnappschuss (lokal erzeugt, kein Stream)."""
+    if not key.replace("-", "").isalnum() or len(key) < 8 or len(key) > 32:
+        raise HTTPException(status_code=400, detail="Ungültiger Key")
+    from ..services.webcam import WEBCAM_DIR
+
+    path = WEBCAM_DIR / f"{key}.jpg"
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Noch kein Bild verfügbar")
+    return FileResponse(path, media_type="image/jpeg",
+                        headers={"Cache-Control": "no-store"})
+
+
 @router.get("/media/{item_id}")
 def media_file(item_id: int, db: Session = Depends(get_db)):
     from ..models import MediaItem

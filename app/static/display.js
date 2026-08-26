@@ -48,12 +48,31 @@
   /* ── Vorschau-Modus (?preview=LAYOUT_ID) ─────────────────────────────
      Rendert exakt wie ein echtes Display, aber: keine Registrierung,
      kein Pairing, kein localStorage, kein WebSocket – nur Lesen über
-     die angemeldete Admin-Session. */
+     die angemeldete Admin-Session.
+     Leiste: blendet sich nach 8 s selbst aus, kommt bei Mausbewegung
+     zurück und lässt sich per ✕ dauerhaft für die Sitzung schließen. */
   async function runPreview(layoutId) {
     pairingEl.classList.add("hidden");
     document.body.classList.add("previewing");
     const bar = document.getElementById("preview-bar");
-    if (bar) bar.classList.remove("hidden");
+    if (!bar) return;
+    bar.classList.remove("hidden");
+
+    let closed = false;
+    let hideTimer = null;
+    const armHide = () => {
+      clearTimeout(hideTimer);
+      hideTimer = setTimeout(() => { if (!closed) bar.classList.add("auto-hidden"); },
+        8000);
+    };
+    document.getElementById("preview-close").addEventListener("click", () => {
+      closed = true;
+      bar.classList.add("hidden");
+    });
+    document.addEventListener("mousemove", () => {
+      if (!closed) { bar.classList.remove("auto-hidden"); armHide(); }
+    });
+    armHide();
 
     const tick = async () => {
       try {
@@ -319,6 +338,88 @@
         track.style.animationDuration =
           `${Math.max(10, Number(state.ticker_speed) || 30)}s`;
         w.appendChild(track);
+        return w;
+      }
+      case "webcam": {
+        const url = cfg.resolved_url || cfg.url;
+        if (!url) {
+          if (!cfg.blocked) return null;
+          const w = widget("w-webcam");
+          w.innerHTML =
+            '<div class="cam-fallback">Kamera deaktiviert – externe Dienste ' +
+            "sind im Admin nicht freigegeben (lokale Kameras funktionieren immer)</div>";
+          return w;
+        }
+        const w = widget("w-webcam");
+        const mode = cfg.mode || "snapshot";
+        if (mode === "hls") {
+          const v = document.createElement("video");
+          v.muted = true; v.autoplay = true; v.playsInline = true;
+          if (window.Hls && Hls.isSupported()) {
+            const hls = new Hls({ liveDurationInfinity: true });
+            hls.loadSource(url);
+            hls.attachMedia(v);
+          } else if (v.canPlayType("application/vnd.apple.mpegurl")) {
+            v.src = url; // Safari / Smart-TV-Browser nativ
+          } else {
+            w.innerHTML =
+              '<div class="cam-fallback">HLS wird von diesem Browser nicht unterstützt</div>';
+          }
+          w.appendChild(v);
+        } else {
+          // snapshot / rtsp (lokaler ffmpeg-Schnappschuss) / mjpeg
+          const img = document.createElement("img");
+          img.alt = "Kamera";
+          img.src = mode === "mjpeg" ? url : `${url}${url.includes("?") ? "&" : "?"}t=${Date.now()}`;
+          w.appendChild(img);
+          const refresh = Math.max(5, Number(cfg.refresh_seconds) || 30);
+          if (mode !== "mjpeg") {
+            galleryTimers.push(setInterval(() => {
+              img.src = `${cfg.resolved_url || cfg.url}` +
+                `${(cfg.resolved_url || cfg.url).includes("?") ? "&" : "?"}t=${Date.now()}`;
+            }, refresh * 1000));
+          }
+        }
+        if (cfg.caption) {
+          const cap = document.createElement("div");
+          cap.className = "cam-caption";
+          cap.textContent = cfg.caption;
+          w.appendChild(cap);
+        }
+        return w;
+      }
+      case "website": {
+        let target = cfg.url || "";
+        if (!target.startsWith("http")) return null;
+        if (cfg.blocked) {
+          const w = widget("w-webcam");
+          w.innerHTML =
+            '<div class="cam-fallback">Webseite deaktiviert – ' +
+            "externe Dienste sind im Admin nicht freigegeben</div>";
+          return w;
+        }
+        if (cfg.consent_param) {
+          target += (target.includes("?") ? "&" : "?") + cfg.consent_param;
+        }
+        const frame = document.createElement("iframe");
+        frame.src = target;
+        frame.className = "w-website";
+        frame.setAttribute("sandbox",
+          "allow-scripts allow-same-origin allow-forms allow-popups");
+        frame.setAttribute("referrerpolicy", "no-referrer");
+        frame.setAttribute("title", "Eingebettete Webseite");
+        return frame;
+      }
+      case "rss": {
+        const items = cfg.items || [];
+        if (!items.length) return null;
+        const w = widget("w-rss panel-bg");
+        w.innerHTML = `<div class="list-title">Nachrichten${cfg.stale ? " ◌" : ""}</div>` +
+          items.map((it) => `
+            <div class="item">
+              <div class="what">${escapeHtml(it.title)}</div>
+              ${it.date ? `<div class="when">${escapeHtml(it.date)}</div>` : ""}
+            </div>`).join("");
         return w;
       }
       default:

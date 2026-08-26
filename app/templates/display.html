@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{ app_name }} · Display</title>
   <link rel="stylesheet" href="/static/display.css">
+  <script src="/static/vendor/hls.min.js"></script>
 </head>
 <body>
   <div id="stage" class="landscape"></div>
@@ -19,6 +20,7 @@
     <strong>Vorschau</strong>
     <span class="muted-p">zeigt exakt, was das Display rendert</span>
     <a id="preview-edit-link" href="/layouts">Im Editor bearbeiten ↗</a>
+    <button id="preview-close" type="button" title="Leiste ausblenden">✕</button>
   </div>
 
   <div id="pairing" class="hidden">

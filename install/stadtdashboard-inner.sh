@@ -66,7 +66,7 @@ echo -e "${GN}━━━━━━━━━━━━━━━━━━━━━━
 msg_info "System aktualisieren und Basis-Pakete installieren"
 apt-get update -qq
 apt-get install -y -qq \
-  curl wget git ca-certificates openssl tzdata \
+  curl wget git ca-certificates openssl tzdata ffmpeg \
   python3 python3-venv python3-pip >/dev/null
 msg_ok "Basis-Pakete installiert"
 

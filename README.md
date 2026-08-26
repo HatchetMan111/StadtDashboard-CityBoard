@@ -80,10 +80,16 @@ als „ggf. veraltet“ markiert). Live-Updates kommen per WebSocket.
 ### Widgets (V1)
 Kopf (Logo + Stadt) · Uhr · Datum · Wetter · Vorhersage · Text · Bild ·
 Bildergalerie · Veranstaltungen · Bekanntmachungen · QR-Code · Ticker ·
+**Kamera** (Snapshot/MJPEG/HLS sowie **RTSP** – Server holt per ffmpeg
+Einzelframes, datenschutzfreundlich ohne Dauersream) ·
+**Webseite** (iFrame mit optionalem Consent-/Cookie-URL-Parameter) ·
+**RSS-Feed** (RSS/Atom, gecached, nur bei aktiviertem externem Zugriff) ·
 Notfall-Banner (automatisch bei Priorität ≥ „Wichtig“)
 
 Layouts sind JSON mit Prozent-Koordinaten → funktionieren in Querformat,
-Hochformat (1080×1920) und 4K ohne Sonderbehandlung.
+Hochformat (1080×1920) und 4K ohne Sonderbehandlung. Der Drag-&-Drop-Editor
+bietet Snap-Raster, Führungslinien, Undo (Strg+Z), Ebenen und Löschen direkt
+am Widget (✕ oder Entf-Taste).
 
 ---
 
@@ -136,8 +142,8 @@ Details: [docs/ARCHITEKTUR.md](docs/ARCHITEKTUR.md)
 ## ✅ Verifikation
 
 ```
-pytest .................. 32 passed (Rate-Limit, Rollen-Matrix, ICS, Assign,
-                          Duplizieren, Notifier, Scheduler, Backup …)
+pytest .................. 40 passed (Widgets/RSS/Webcam-Gating, Rollen-Matrix,
+                          ICS, Rate-Limit, Notifier, Scheduler, Backup …)
 Installer-E2E ........... 5/5 (Stub-Proxmox: Create/Kollision/Update/404)
 bash -n + shellcheck .... outer/inner/e2e fehlerfrei
 ```

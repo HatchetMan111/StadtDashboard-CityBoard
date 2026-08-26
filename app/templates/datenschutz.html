@@ -32,6 +32,18 @@
       <tr><td>Wetter (Open-Meteo)</td>
           <td><span class="badge warn">optional extern</span></td>
           <td>Übermittelt Koordinaten an api.open-meteo.com; standardmäßig deaktiviert</td></tr>
+      <tr><td>Kamera: RTSP/Snapshot/MJPEG/HLS</td>
+          <td><span class="badge warn">konfigurierbar</span></td>
+          <td>RTSP wird serverseitig per ffmpeg als Einzelbild geholt (kein Dauersream);
+              lokale Kameras (LAN) funktionieren ohne externe Freigabe</td></tr>
+      <tr><td>Webseite-iFrame / RSS-Feeds</td>
+          <td><span class="badge warn">optional extern</span></td>
+          <td>Lädt Inhalte Dritter im Display-Browser bzw. serverseitig;
+              nur mit aktiviertem externem Zugriff (RSS) bzw. bewusster Einbindung</td></tr>
+      <tr><td>Offline-Wächter</td>
+          <td><span class="badge warn">konfigurierbar</span></td>
+          <td>Versendet nur bei aktivierter Konfiguration an den selbst gewählten
+              Webhook/SMTP-Server</td></tr>
       <tr><td>Analytics / Tracking</td><td><span class="badge ok">nicht vorhanden</span></td>
           <td>Es gibt keine Statistik-, Tracking- oder Fingerprint-Funktionen</td></tr>
       <tr><td>Display-Anmeldung</td><td><span class="badge ok">lokal</span></td>

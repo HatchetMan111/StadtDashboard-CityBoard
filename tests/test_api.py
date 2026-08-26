@@ -277,7 +277,7 @@ def test_layout_preview_state(admin_client):
 def test_layout_rejects_unknown_widget_type(admin_client):
     resp = admin_client.post("/api/admin/layouts", json={
         "name": "Kaputt", "orientation": "landscape",
-        "elements": [{"type": "webcam", "x": 0, "y": 0, "w": 10, "h": 10}]})
+        "elements": [{"type": "hologramm", "x": 0, "y": 0, "w": 10, "h": 10}]})
     assert resp.status_code == 422
 
 

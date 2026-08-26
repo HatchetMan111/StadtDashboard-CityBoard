@@ -145,6 +145,12 @@ code { background: #eef2f7; padding: 1px 6px; border-radius: 6px; font-size: 13p
             pointer-events: none; z-index: 8; }
 .ed-guide.v { left: 50%; top: 0; width: 1px; height: 100%; }
 .ed-guide.h { top: 50%; left: 0; height: 1px; width: 100%; }
+.ed-del {
+  position: absolute; right: 0; top: 0; width: 20px; height: 20px;
+  background: var(--danger); color: #fff; border: none; cursor: pointer;
+  font-size: 12px; line-height: 1; border-radius: 0 0 0 6px;
+}
+.ed-del:hover { background: #b91c1c; }
 
 .props-grid { display: grid; grid-template-columns: repeat(4, 1fr);
               gap: 8px; margin-bottom: 10px; }

@@ -697,7 +697,7 @@ async def assign_media(
 # ── Layouts ─────────────────────────────────────────────────────────────────
 WIDGET_TYPES = {
     "header", "clock", "date", "weather", "forecast", "text", "image", "gallery",
-    "events", "announcements", "qr", "ticker",
+    "events", "announcements", "qr", "ticker", "webcam", "website", "rss",
 }
 
 

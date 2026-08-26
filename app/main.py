@@ -25,10 +25,19 @@ app = FastAPI(title=config.APP_NAME, version=config.VERSION, docs_url=None, redo
 @app.on_event("startup")
 async def on_startup() -> None:
     init_db()
-    from .services import notifier
+    from .services import notifier, webcam
 
     app.state.notifier_task = asyncio.create_task(notifier.loop())
-    log.info("%s v%s gestartet (Port %s) – Offline-Wächter aktiv",
+
+    async def webcam_layouts() -> list[dict]:
+        from .database import SessionLocal
+        from .models import Layout
+
+        with SessionLocal() as db:
+            return [{"elements": l.elements} for l in db.query(Layout).all()]
+
+    app.state.webcam_task = asyncio.create_task(webcam.loop(webcam_layouts))
+    log.info("%s v%s gestartet (Port %s) – Offline-Wächter & Webcam-Task aktiv",
              config.APP_NAME, config.VERSION, config.PORT)
 
 
