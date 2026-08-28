@@ -12,8 +12,8 @@
 
 <div class="panel">
   <form id="media-upload" class="inline">
-    <span class="field" style="flex:1"><label>Datei (JPG, PNG, GIF, WebP, SVG, MP4, WebM · max. 25 MB)</label>
-      <input type="file" id="media-input" accept=".jpg,.jpeg,.png,.gif,.webp,.svg,.mp4,.webm"></span>
+    <span class="field" style="flex:1"><label>Dateien (JPG, PNG, GIF, WebP, SVG, MP4, WebM · max. 25 MB pro Datei · Mehrfachauswahl möglich)</label>
+      <input type="file" id="media-input" accept=".jpg,.jpeg,.png,.gif,.webp,.svg,.mp4,.webm" multiple></span>
     <button class="btn" type="submit">Hochladen</button>
   </form>
 </div>
@@ -27,6 +27,11 @@
       „＋ Galerie“ hängt das Medium an die erste Galerie des Layouts (legt eine an,
       falls keine existiert), „Als Bild“ setzt es in das erste Bild-Widget.</span>
   </div>
+</div>
+
+<div class="panel">
+  <input type="search" id="media-search" class="field"
+         placeholder="🔎 Medien durchsuchen …" style="max-width:340px">
 </div>
 
 <div class="media-grid" id="media-grid"></div>

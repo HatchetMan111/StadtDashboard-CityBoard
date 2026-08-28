@@ -36,8 +36,10 @@
       const t = document.createElement("div");
       t.className = "toast" + (error ? " error" : "");
       t.textContent = msg;
+      t.title = "Klicken zum Schließen";
+      t.addEventListener("click", () => t.remove());
       box.appendChild(t);
-      setTimeout(() => t.remove(), 4200);
+      setTimeout(() => t.remove(), error ? 8000 : 4200);
     },
 
     /* Clipboard mit Fallback: navigator.clipboard gibt es nur in Secure
@@ -68,6 +70,16 @@
     esc(s) {
       return String(s ?? "").replace(/[&<>"']/g,
         c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    },
+
+    /* Button während eines Requests sperren → schützt vor Doppelklicks
+       (Doppel-Uploads, doppelt angelegte Objekte …). */
+    async withBusy(btn, fn) {
+      if (btn && btn.disabled) return;
+      if (btn) btn.disabled = true;
+      try { return await fn(); }
+      catch (err) { this.toast(err.message, true); }
+      finally { if (btn) btn.disabled = false; }
     },
 
     fmtDT(iso) {
@@ -124,6 +136,7 @@
         layouts: () => this.pageLayouts(),
         schedules: () => this.pageSchedules(),
         settings: () => this.pageSettings(),
+        konto: () => this.pageKonto(),
         datenschutz: () => this.pageDatenschutz(),
       };
       if (handlers[page]) await handlers[page]();
@@ -155,12 +168,14 @@
     /* ── Dashboard ─────────────────────────────────────────────────────── */
     async pageDashboard() {
       try {
+        // Einzelne Catches: wenn z. B. Medien 500 liefert, stirbt nicht die
+        // ganze Seite, sondern nur der betreffende Kasten bleibt leer.
         const [displays, anns, events, status, media, layouts, schedules] =
           await Promise.all([
-            this.api("/api/admin/displays"),
-            this.api("/api/admin/announcements"),
-            this.api("/api/admin/events"),
-            this.api("/api/admin/status"),
+            this.api("/api/admin/displays").catch((e) => { this.toast(e.message, true); return []; }),
+            this.api("/api/admin/announcements").catch((e) => { this.toast(e.message, true); return []; }),
+            this.api("/api/admin/events").catch((e) => { this.toast(e.message, true); return []; }),
+            this.api("/api/admin/status").catch(() => ({})),
             this.api("/api/admin/media").catch(() => []),
             this.api("/api/admin/layouts").catch(() => []),
             this.api("/api/admin/schedules").catch(() => []),
@@ -248,12 +263,12 @@
           if (typed !== null) this.toast("URL angezeigt – bitte manuell kopieren");
         });
 
-      let layouts = [], schedules = [];
+      let layouts = [], schedules = [], displays = [];
       const reload = async () => {
         [layouts, schedules] = await Promise.all([
           this.api("/api/admin/layouts"), this.api("/api/admin/schedules")]);
-        const rows = await this.api("/api/admin/displays");
-        render(rows);
+        displays = await this.api("/api/admin/displays");
+        render(displays);
       };
       const layoutOpts = sel => ["<option value=''>Standard (Zeitplan)</option>"]
         .concat(layouts.map(l =>
@@ -296,11 +311,12 @@
         if (!tr || e.target.tagName !== "SELECT") return;
         const field = e.target.dataset.act === "layout" ? "layout_id" : "schedule_id";
         const val = e.target.value ? Number(e.target.value) : null;
-        try {
+        await this.withBusy(e.target, async () => {
           await this.api(`/api/admin/displays/${tr.dataset.id}`,
             { method: "PATCH", body: { [field]: val } });
           this.toast("Gespeichert");
-        } catch (err) { this.toast(err.message, true); }
+          await reload();   // „Jetzt aktiv“-Spalte frisch halten
+        });
       });
 
       document.getElementById("display-rows").addEventListener("click", async e => {
@@ -314,8 +330,11 @@
             await this.api(`/api/admin/displays/${id}/approve`, { method: "POST" });
             this.toast("Display gekoppelt");
           } else if (act === "toggle") {
-            const enabled = btn.textContent.trim() === "Sperren";
-            await this.api(`/api/admin/displays/${id}`, { method: "PATCH", body: { enabled } });
+            const d = displays.find(x => String(x.id) === id);
+            const enabled = !d?.enabled;   // aus Datenzustand, nicht Label
+            await this.api(`/api/admin/displays/${id}`,
+              { method: "PATCH", body: { enabled } });
+            this.toast(enabled ? "Display entsperrt" : "Display gesperrt");
           } else if (act === "revoke") {
             if (!confirm("Token zurücksetzen? Das Display muss neu gekoppelt werden.")) return;
             await this.api(`/api/admin/displays/${id}/revoke`, { method: "POST" });
@@ -332,18 +351,26 @@
 
       const modal = document.getElementById("display-modal");
       const openEdit = id => {
-        const row = document.querySelector(`tr[data-id="${id}"]`);
-        modal.dataset.id = id;
-        modal.dname.value = row.children[1].childNodes[0].textContent.trim();
-        modal.dloc.value = row.querySelector(".muted").textContent.trim();
-        modal.dorient.value = row.children[1].textContent.includes("portrait")
-          ? "portrait" : "landscape";
+        const d = displays.find(x => String(x.id) === String(id));
+        if (!d) return;
+        modal.dataset.id = d.id;
+        modal.dname.value = d.name || "";
+        modal.dloc.value = d.location || "";
+        modal.dorient.value = d.orientation || "landscape";
         modal.classList.add("open");
+        modal.dname.focus();
       };
+      const closeModal = () => modal.classList.remove("open");
       document.getElementById("display-modal-cancel")
-        .addEventListener("click", () => modal.classList.remove("open"));
-      document.getElementById("display-modal-save").addEventListener("click", async () => {
-        try {
+        .addEventListener("click", closeModal);
+      modal.addEventListener("click", (e) => {
+        if (e.target === modal) closeModal();   // Backdrop-Klick
+      });
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape" && modal.classList.contains("open")) closeModal();
+      });
+      document.getElementById("display-modal-save").addEventListener("click", (e) => {
+        this.withBusy(e.target, async () => {
           await this.api(`/api/admin/displays/${modal.dataset.id}`, {
             method: "PATCH",
             body: { name: modal.dname.value.trim(), location: modal.dloc.value.trim(),
@@ -352,7 +379,7 @@
           modal.classList.remove("open");
           this.toast("Gespeichert");
           await reload();
-        } catch (err) { this.toast(err.message, true); }
+        });
       });
 
       await reload().catch(err => this.toast(err.message, true));
@@ -382,7 +409,8 @@
     /* ── Veranstaltungen ───────────────────────────────────────────────── */
     pageEvents() {
       const resultEl = document.getElementById("ics-result");
-      document.getElementById("ics-import").addEventListener("click", async () => {
+      document.getElementById("ics-import").addEventListener("click", (e) => {
+        this.withBusy(e.target, async () => {
         const fileIn = document.getElementById("ics-file");
         const url = document.getElementById("ics-url").value.trim();
         if (!fileIn.files.length && !url) {
@@ -406,10 +434,31 @@
           document.getElementById("ics-url").value = "";
           window.dispatchEvent(new Event("sb-reload-ev-rows"));
         } catch (err) { resultEl.textContent = "Fehler: " + err.message; }
+        });
       });
+
+      const searchEl = document.getElementById("ev-search");
+      const hidePastEl = document.getElementById("ev-hide-past");
+      const applyEvFilter = (items) => {
+        const q = (searchEl?.value || "").trim().toLowerCase();
+        const hidePast = hidePastEl?.checked;
+        return items.filter((e) => {
+          if (hidePast && new Date(e.start_at) < new Date(Date.now() - 3 * 3600 * 1000)) {
+            return false;
+          }
+          if (!q) return true;
+          return [e.title, e.description, e.location, e.category]
+            .some((v) => (v || "").toLowerCase().includes(q));
+        });
+      };
+      searchEl?.addEventListener("input", () =>
+        document.dispatchEvent(new CustomEvent("sb-filter-ev")));
+      hidePastEl?.addEventListener("change", () =>
+        document.dispatchEvent(new CustomEvent("sb-filter-ev")));
 
       this._crudList({
       listId: "ev-rows", formId: "ev-form", endpoint: "/api/admin/events",
+      applyFilter: applyEvFilter, filterEvent: "sb-filter-ev",
       rowHtml: e => `
         <td>${this.fmtDT(e.start_at)}${e.end_at ? "<br>bis " + this.fmtDT(e.end_at) : ""}</td>
         <td>${this.esc(e.title)}${e.featured ? ' <span class="badge ok">Highlight</span>' : ""}
@@ -427,23 +476,58 @@
 
     async _crudList(cfg) {
       let editId = null;
+      let items = [];
       const form = document.getElementById(cfg.formId);
       const head = document.getElementById(`${cfg.formId}-title`);
+      const submitBtn = form.querySelector('button[type="submit"]');
+
+      // Abbrechen-Button für den Bearbeiten-Modus
+      let cancelBtn = form.querySelector("[data-cancel]");
+      if (!cancelBtn) {
+        cancelBtn = document.createElement("button");
+        cancelBtn.type = "button";
+        cancelBtn.className = "btn secondary hidden";
+        cancelBtn.textContent = "Abbrechen";
+        submitBtn.after(cancelBtn);
+      }
+
+      const clearEdit = () => {
+        editId = null;
+        head.textContent = "Neu anlegen";
+        submitBtn.textContent = "Hinzufügen";
+        cancelBtn.classList.add("hidden");
+        document.querySelector(`#${cfg.listId} tr.editing`)?.classList
+          .remove("editing");
+      };
 
       const reload = async () => {
-        const rows = await this.api(cfg.endpoint);
-        document.getElementById(cfg.listId).innerHTML = rows.map(r => `
+        items = await this.api(cfg.endpoint);
+        renderRows();
+      };
+
+      const renderRows = () => {
+        const visible = cfg.applyFilter ? cfg.applyFilter(items) : items;
+        document.getElementById(cfg.listId).innerHTML = visible.map(r => `
           <tr data-id="${r.id}">${cfg.rowHtml.call(this, r)}
             <td style="white-space:nowrap">
               <button class="btn secondary small" data-edit="${r.id}">Bearbeiten</button>
               <button class="btn danger small" data-del="${r.id}">Löschen</button>
             </td></tr>`).join("") ||
-          `<tr><td colspan="5" class="muted">Noch keine Einträge.</td></tr>`;
+          `<tr><td colspan="5" class="muted">${items.length
+            ? "Keine Treffer für den Filter."
+            : "Noch keine Einträge."}</td></tr>`;
+      };
+
+      const markEditing = (id) => {
+        document.querySelector(`#${cfg.listId} tr.editing`)?.classList
+          .remove("editing");
+        document.querySelector(`#${cfg.listId} tr[data-id="${id}"]`)?.classList
+          .add("editing");
       };
 
       form.addEventListener("submit", async e => {
         e.preventDefault();
-        try {
+        await this.withBusy(e.submitter || submitBtn, async () => {
           const body = cfg.fill(form);
           if (editId) {
             await this.api(`${cfg.endpoint}/${editId}`, { method: "PATCH", body });
@@ -451,25 +535,25 @@
             await this.api(cfg.endpoint, { method: "POST", body });
           }
           cfg.resetForm(form);
-          editId = null;
-          head.textContent = "Neu anlegen";
-          form.querySelector('button[type="submit"]').textContent = "Hinzufügen";
+          clearEdit();
           this.toast("Gespeichert");
           await reload();
-        } catch (err) { this.toast(err.message, true); }
+        });
       });
+      cancelBtn.addEventListener("click", () => { cfg.resetForm(form); clearEdit(); });
 
-      document.getElementById(cfg.listId).addEventListener("click", async e => {        const del = e.target.closest("[data-del]");
+      document.getElementById(cfg.listId).addEventListener("click", async e => {
+        const del = e.target.closest("[data-del]");
         const ed = e.target.closest("[data-edit]");
         try {
           if (del) {
             if (!confirm("Wirklich löschen?")) return;
             await this.api(`${cfg.endpoint}/${del.dataset.del}`, { method: "DELETE" });
             this.toast("Gelöscht");
+            if (editId && String(editId) === del.dataset.del) { cfg.resetForm(form); clearEdit(); }
             await reload();
           } else if (ed) {
-            const rows = await this.api(cfg.endpoint);
-            const item = rows.find(r => String(r.id) === ed.dataset.edit);
+            const item = items.find(r => String(r.id) === ed.dataset.edit);
             if (!item) return;
             editId = item.id;
             form.title.value = item.title || "";
@@ -485,8 +569,11 @@
             if (form.website) form.website.value = item.website || "";
             if (form.featured) form.featured.checked = !!item.featured;
             head.textContent = "Bearbeiten";
-            form.querySelector('button[type="submit"]').textContent = "Änderungen speichern";
+            submitBtn.textContent = "Änderungen speichern";
+            cancelBtn.classList.remove("hidden");
+            markEditing(item.id);
             form.scrollIntoView({ behavior: "smooth" });
+            form.title.focus();
           }
         } catch (err) { this.toast(err.message, true); }
       });
@@ -495,6 +582,9 @@
       window.addEventListener(`sb-reload-${cfg.listId}`, () => {
         reload().catch(() => {});
       });
+      if (cfg.filterEvent) {
+        document.addEventListener(cfg.filterEvent, renderRows);
+      }
 
       await reload().catch(err => this.toast(err.message, true));
     },
@@ -519,10 +609,24 @@
       /* Zuweisung läuft über POST /api/admin/media/{id}/assign
          (serverseitig, funktioniert auch für Redakteure). */
 
+      let mediaItems = [];
+      const filterEl = document.getElementById("media-search");
+      const form = document.getElementById("media-upload");
+
       async function reload() {
-        const items = await SB.api("/api/admin/media");
+        mediaItems = await SB.api("/api/admin/media");
+        renderGrid();
+      }
+
+      function renderGrid() {
+        const q = (filterEl?.value || "").trim().toLowerCase();
+        const items = q
+          ? mediaItems.filter((m) =>
+              (m.title || "").toLowerCase().includes(q) ||
+              (m.mime || "").toLowerCase().includes(q))
+          : mediaItems;
         grid.innerHTML = items.map((m) => `
-          <div class="media-item" data-id="${m.id}">
+          <div class="media-item" data-id="${m.id}" data-title="${SB.esc(m.title)}">
             ${m.kind === "image"
               ? `<img src="${m.thumb_url || m.url}" alt="" loading="lazy">`
               : `<video src="${m.url}" preload="metadata"></video>`}
@@ -538,8 +642,10 @@
               <button class="btn danger small" data-del="${m.id}">Löschen</button>
             </div>
           </div>`).join("") ||
-          `<p class="muted">Noch keine Medien hochgeladen.</p>`;
+          (q ? `<p class="muted">Kein Medium passt zu „${SB.esc(q)}“.</p>`
+             : `<p class="muted">Noch keine Medien hochgeladen.</p>`);
       }
+      if (filterEl) filterEl.addEventListener("input", renderGrid);
 
       grid.addEventListener("click", async (e) => {
         const gal = e.target.closest("[data-addgal]");
@@ -561,7 +667,11 @@
                          : "Als Bild gesetzt – ▶ Vorschau unten");
             await reload();
           } else if (del) {
-            if (!confirm("Medium wirklich löschen?")) return;
+            const item = del.closest(".media-item");
+            const title = item?.dataset.title || "Medium";
+            if (!confirm(`„${title}" wirklich löschen?\n\n` +
+              "Hinweis: Bilder/Galerien, die dieses Medium verwenden, " +
+              "zeigen danach nichts mehr an.")) return;
             await SB.api(`/api/admin/media/${del.dataset.del}`, { method: "DELETE" });
             delete lastAssigned[del.dataset.del];
             await reload();
@@ -569,17 +679,27 @@
         } catch (err) { SB.toast(err.message, true); }
       });
 
-      document.getElementById("media-upload").addEventListener("submit", async (e) => {
+      document.getElementById("media-upload").addEventListener("submit", (e) => {
         e.preventDefault();
-        if (!input.files.length) return this.toast("Keine Datei gewählt", true);
-        const fd = new FormData();
-        fd.append("file", input.files[0]);
-        try {
-          await this.api("/api/admin/media", { method: "POST", body: fd });
-          this.toast("Upload erfolgreich – jetzt unten einem Layout zuweisen");
+        this.withBusy(e.submitter || form, async () => {
+          if (!input.files.length) return this.toast("Keine Datei gewählt", true);
+          let ok = 0, failed = 0;
+          for (const file of input.files) {
+            const fd = new FormData();
+            fd.append("file", file);
+            try {
+              await this.api("/api/admin/media", { method: "POST", body: fd });
+              ok += 1;
+            } catch (err) {
+              failed += 1;
+              this.toast(`${file.name}: ${err.message}`, true);
+            }
+          }
+          if (ok) this.toast(`${ok} Datei(en) hochgeladen` +
+            (failed ? ` – ${failed} fehlgeschlagen` : ""));
           input.value = "";
           await reload();
-        } catch (err) { this.toast(err.message, true); }
+        });
       });
 
       layouts = await SB.api("/api/admin/layouts").catch(() => []);
@@ -703,14 +823,51 @@
         draw(); buildProps();
       };
       $("ed-undo").addEventListener("click", undo);
+
+      /* Widget-Zwischenablage (lebt solange die Seite offen ist –
+         funktioniert damit auch zwischen Layouts) */
+      let clipEl = null;
+      const copySelected = () => {
+        if (S.sel < 0) return false;
+        clipEl = JSON.parse(JSON.stringify(S.els[S.sel]));
+        return true;
+      };
+      const pasteClip = () => {
+        if (!clipEl) return;
+        pushHistory();
+        const copy = JSON.parse(JSON.stringify(clipEl));
+        copy.x = clamp(copy.x + 2, 0, 100 - copy.w);
+        copy.y = clamp(copy.y + 2, 0, 100 - copy.h);
+        S.els.push(copy);
+        select(S.els.length - 1);
+        draw();
+        markDirty();
+      };
+
       document.addEventListener("keydown", (e) => {
         const t = e.target;
         if (t && /^(input|textarea|select)$/i.test(t.tagName)) return;
-        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
+        const k = e.key.toLowerCase();
+        if ((e.ctrlKey || e.metaKey) && k === "z") {
           e.preventDefault(); undo();
-        } else if ((e.key === "Delete" || e.key === "Backspace") && S.sel >= 0) {
+        } else if ((e.ctrlKey || e.metaKey) && k === "c") {
+          if (copySelected()) SB.toast("Widget kopiert");
+        } else if ((e.ctrlKey || e.metaKey) && k === "v") {
+          e.preventDefault(); pasteClip();
+        } else if (e.key === "Delete" || e.key === "Backspace") {
+          if (S.sel >= 0) { e.preventDefault(); deleteSelected(); }
+        } else if (e.key.startsWith("Arrow") && S.sel >= 0) {
+          // Pfeiltasten verschieben das gewählte Widget (mit Shift: 5 %)
           e.preventDefault();
-          deleteSelected();
+          const step = e.shiftKey ? 5 : 1;
+          const el = S.els[S.sel];
+          if (e.key === "ArrowLeft") el.x = clamp(el.x - step, 0, 100 - el.w);
+          else if (e.key === "ArrowRight") el.x = clamp(el.x + step, 0, 100 - el.w);
+          else if (e.key === "ArrowUp") el.y = clamp(el.y - step, 0, 100 - el.h);
+          else if (e.key === "ArrowDown") el.y = clamp(el.y + step, 0, 100 - el.h);
+          positionEl(S.sel);
+          buildProps();
+          markDirty();
         }
       });
 
@@ -1100,10 +1257,18 @@
               ${l.is_default ? "" :
                 `<button class="btn secondary small" data-default="${l.id}">Standard</button>`}
               <button class="btn danger small" data-del="${l.id}">Löschen</button>
-            </td></tr>`).join("");
+            </td></tr>`).join("") ||
+          `<tr><td colspan="2" class="muted">Noch keine Layouts –
+             lege oben eines an oder nutze auf „Layout gestalten“ eine Vorlage.</td></tr>`;
+      }
+
+      function confirmDiscard() {
+        if (!dirty) return true;
+        return confirm("Es gibt ungespeicherte Änderungen. Verwerfen?");
       }
 
       function loadLayout(id) {
+        if (S.id !== id && !confirmDiscard()) return;
         const l = S.layouts.find((x) => x.id === id);
         if (!l) return;
         S.id = id;
@@ -1223,6 +1388,7 @@
       });
 
       $("layout-new").addEventListener("click", () => {
+        if (!confirmDiscard()) return;
         S.id = null; S.els = []; S.sel = -1;
         S.bg = { mode: "color", color: "#0b1220", dim: 0.35 };
         $("layout-name").value = "Neues Layout";
@@ -1232,7 +1398,8 @@
         renderList(); draw(); buildProps();
       });
 
-      $("layout-save").addEventListener("click", async () => {
+      $("layout-save").addEventListener("click", (e) => {
+        this.withBusy(e.target, async () => {
         const name = $("layout-name").value.trim() || "Layout";
         const current = S.layouts.find((l) => l.id === S.id);
         const body = { name, orientation: $("layout-orientation").value,
@@ -1253,6 +1420,7 @@
           if (frame && S.id) { frame.src = `/display?preview=${S.id}`; }
           await reloadAll();
         } catch (err) { SB.toast(err.message, true); }
+        });
       });
 
       $("layout-orientation").addEventListener("change", draw);
@@ -1287,6 +1455,7 @@
           SB.api("/api/admin/media").catch(() => []),
         ]);
         renderList();
+        if (dirty) { buildProps(); return; }  // ungespeicherte Arbeit behalten
         if (S.id == null && S.layouts.length) loadLayout(S.layouts[0].id);
         else if (S.id != null) { const cur = S.layouts.find(l => l.id === S.id); if (cur) loadLayout(S.id); }
         buildProps();
@@ -1397,6 +1566,7 @@
       $("g-presets").addEventListener("click", async (e) => {
         const card = e.target.closest("[data-preset]");
         if (!card) return;
+        await SB.withBusy(card, async () => {
         try {
           const res = await SB.api("/api/admin/layouts/from-preset", {
             method: "POST", body: { preset_id: card.dataset.preset } });
@@ -1405,6 +1575,7 @@
           renderLayoutOptions();
           $("g-layout").value = String(res.id);
         } catch (err) { SB.toast(err.message, true); }
+        });
       });
 
       /* ── Schritt 2: Kategorien ── */
@@ -1550,8 +1721,9 @@
         $("g-form-panel").scrollIntoView({ behavior: "smooth", block: "nearest" });
       });
 
-      $("g-add").addEventListener("click", async () => {
+      $("g-add").addEventListener("click", (e) => {
         if (!currentCat) return;
+        SB.withBusy(e.target, async () => {
         const layoutId = $("g-layout").value;
         if (!layoutId) return SB.toast("Erst ein Layout in Schritt 1 wählen", true);
         const cfg = {};
@@ -1593,6 +1765,7 @@
           $("g-done").classList.remove("hidden");
           SB.toast(`${currentCat.label} hinzugefügt – ▶ Vorschau ansehen!`);
         } catch (err) { SB.toast(err.message, true); }
+        });
       });
 
       $("g-done-more").addEventListener("click", () => {
@@ -1683,7 +1856,8 @@
         rulesBox.innerHTML = "";
       });
 
-      document.getElementById("sched-save").addEventListener("click", async () => {
+      document.getElementById("sched-save").addEventListener("click", (e) => {
+        this.withBusy(e.target, async () => {
         const body = { name: nameIn.value.trim(), priority: Number(prioIn.value),
           rules: collectRules() };
         if (!body.name) return this.toast("Name fehlt", true);
@@ -1697,6 +1871,7 @@
           this.toast("Zeitplan gespeichert");
           await reload();
         } catch (err) { this.toast(err.message, true); }
+        });
       });
 
       listBody.addEventListener("click", async e => {
@@ -1748,6 +1923,7 @@
 
       form.addEventListener("submit", async e => {
         e.preventDefault();
+        await this.withBusy(e.submitter, async () => {
         const values = {};
         for (const key of Object.keys(v)) {
           const input = form.elements[key];
@@ -1759,9 +1935,11 @@
           await this.api("/api/admin/settings", { method: "PUT", body: { values } });
           this.toast("Einstellungen gespeichert");
         } catch (err) { this.toast(err.message, true); }
+        });
       });
 
-      document.getElementById("weather-refresh").addEventListener("click", async () => {
+      document.getElementById("weather-refresh").addEventListener("click", (e) => {
+        this.withBusy(e.target, async () => {
         const out = document.getElementById("weather-result");
         out.textContent = "Abruf läuft …";
         try {
@@ -1770,6 +1948,7 @@
             `${w.temp_c} °C · ${w.condition}` +
             (w.forecast.length ? ` · Vorhersage: ${w.forecast.length} Tage` : "");
         } catch (err) { out.textContent = "Fehler: " + err.message; }
+        });
       });
 
       /* Benutzerverwaltung (nur Admin) */
@@ -1794,7 +1973,8 @@
           await reloadUsers.call(this);
         } catch (err) { this.toast(err.message, true); }
       });
-      document.getElementById("user-create").addEventListener("click", async () => {
+      document.getElementById("user-create").addEventListener("click", (e) => {
+        this.withBusy(e.target, async () => {
         const f = document.getElementById("user-form");
         try {
           await this.api("/api/admin/users", {
@@ -1806,6 +1986,7 @@
           this.toast("Benutzer angelegt");
           await reloadUsers.call(this);
         } catch (err) { this.toast(err.message, true); }
+        });
       });
       await reloadUsers.call(this).catch(err => this.toast(err.message, true));
     },

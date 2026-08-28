@@ -19,9 +19,20 @@
   let device = null;
   let ws = null;
   let wsTimer = null;
-  let galleryTimers = [];
+  let dynamicTimers = [];
   let emergencyTimer = null;
   let lastVersion = null;
+  let locked = false;
+  let recovering = false;
+
+  /* Einheitliche Intervall-Registry: alle Timer, die Widgets erzeugen,
+     landen hier und werden beim nächsten Render komplett geräumt –
+     sonst stapeln sich Uhren/Kamera-Refreshs bei jeder Version-Änderung. */
+  function dynInterval(fn, ms) {
+    const t = setInterval(fn, ms);
+    dynamicTimers.push(t);
+    return t;
+  }
 
   /* ── Speicher ─────────────────────────────────────────────────────── */
   function loadDevice() {
@@ -33,6 +44,10 @@
   function loadCachedState() {
     try { return JSON.parse(localStorage.getItem(LS_STATE)); } catch { return null; }
   }
+  function wipeDevice() {
+    device = null;
+    localStorage.removeItem(LS_DEVICE);
+  }
 
   function api(path, opts = {}) {
     if (device) {
@@ -40,7 +55,11 @@
         Authorization: `Bearer ${device.token}` };
     }
     return fetch(path, opts).then(async resp => {
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      if (!resp.ok) {
+        const err = new Error(`HTTP ${resp.status}`);
+        err.status = resp.status;
+        throw err;
+      }
       return resp.json();
     });
   }
@@ -121,16 +140,63 @@
 
   async function waitUntilApproved() {
     pairingEl.classList.remove("hidden");
-    document.getElementById("pair-id").textContent =
-      `Geräte-ID: ${device.device_id.toUpperCase()}`;
+    const showPairId = () => {
+      document.getElementById("pair-id").textContent =
+        `Geräte-ID: ${device.device_id.toUpperCase()}`;
+    };
+    showPairId();
     for (;;) {
       try {
         const status = await api("/api/display/status");
         if (status.approved && status.enabled) break;
-      } catch { /* Server nicht erreichbar – weiter warten */ }
+      } catch (err) {
+        if (err.status === 401) {
+          // Token ungültig (z. B. „Token neu" im Admin) → neu registrieren
+          wipeDevice();
+          await register();
+          showPairId();
+        }
+        /* Server nicht erreichbar oder 403 – weiter warten */
+      }
       await new Promise(r => setTimeout(r, POLL_PAIRING_MS));
     }
     pairingEl.classList.add("hidden");
+  }
+
+  /* ── Sperr-Screen (Display im Admin deaktiviert) ───────────────────── */
+  function showLocked() {
+    if (locked) return;
+    locked = true;
+    clearDynamic();
+    if (emergencyTimer) { clearInterval(emergencyTimer); emergencyTimer = null; }
+    emergencyBanner.classList.add("hidden");
+    stage.className = "";
+    stage.style.background = "#0b1220";
+    stage.innerHTML = `<div class="locked-screen">
+      <div class="lock-icon">🔒</div>
+      <h1>Display gesperrt</h1>
+      <p>Dieses Display wurde im Admin deaktiviert.<br>
+         Sobald es wieder freigegeben wird, erscheinen hier automatisch
+         die Inhalte.</p></div>`;
+  }
+  function unlock() {
+    locked = false;
+    lastVersion = null;  // Render erzwingen
+  }
+
+  /* Token ungültig → Gerät vergessen, neu koppeln, weiterlaufen */
+  async function recoverAuth() {
+    if (recovering) return;
+    recovering = true;
+    try {
+      wipeDevice();
+      await register();
+      await waitUntilApproved();
+      unlock();
+      await refreshState(true);
+    } catch { /* Boot-Fallback greift */ } finally {
+      recovering = false;
+    }
   }
 
   async function start() {
@@ -147,9 +213,12 @@
     try {
       const state = await api("/api/display/state");
       cacheState(state);
+      if (locked) unlock();
       staleBadge.classList.add("hidden");
       render(state);
-    } catch {
+    } catch (err) {
+      if (err.status === 403) { showLocked(); return; }   // gesperrt
+      if (err.status === 401) { await recoverAuth(); return; }  // Token tot
       if (useCacheOnFail) {
         const cached = loadCachedState();
         if (cached) {
@@ -163,8 +232,8 @@
   }
 
   function clearDynamic() {
-    galleryTimers.forEach(t => clearInterval(t));
-    galleryTimers = [];
+    dynamicTimers.forEach(t => clearInterval(t));
+    dynamicTimers = [];
     if (emergencyTimer) clearInterval(emergencyTimer);
   }
 
@@ -236,7 +305,7 @@
             { hour: "2-digit", minute: "2-digit" });
         };
         tick();
-        setInterval(tick, 1000); // Uhr läuft bewusst lokal – auch offline
+        dynInterval(tick, 1000); // Uhr läuft bewusst lokal – auch offline
         w.appendChild(time);
         return w;
       }
@@ -299,8 +368,8 @@
         };
         show();
         if (items.length > 1) {
-          galleryTimers.push(setInterval(show,
-            Math.max(3, Number(cfg.seconds) || 8) * 1000));
+          dynInterval(show,
+            Math.max(3, Number(cfg.seconds) || 8) * 1000);
         }
         return w;
       }
@@ -389,10 +458,10 @@
           w.appendChild(img);
           const refresh = Math.max(5, Number(cfg.refresh_seconds) || 30);
           if (mode !== "mjpeg") {
-            galleryTimers.push(setInterval(() => {
+            dynInterval(() => {
               img.src = `${cfg.resolved_url || cfg.url}` +
                 `${(cfg.resolved_url || cfg.url).includes("?") ? "&" : "?"}t=${Date.now()}`;
-            }, refresh * 1000));
+            }, refresh * 1000);
           }
         }
         if (cfg.caption) {

@@ -83,6 +83,23 @@ input:focus, select:focus, textarea:focus { outline: 2px solid #bfdbfe; border-c
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
 @media (max-width: 900px) { .grid-2 { grid-template-columns: 1fr; } }
 
+/* Mobil: Sidebar wird zur Leiste oben, Tabellen scrollbar */
+@media (max-width: 760px) {
+  .layout { flex-direction: column; }
+  .sidebar { width: 100%; min-height: 0; }
+  .sidebar nav { display: flex; flex-wrap: wrap; overflow-x: auto;
+                 padding: 6px 8px; }
+  .sidebar nav a { white-space: nowrap; padding: 8px 12px; }
+  .sidebar .foot { border-top: 1px solid #1e293b; display: flex;
+                   align-items: center; gap: 10px; }
+  .sidebar .foot button { margin-top: 0; }
+  .content { padding: 14px; }
+  .panel { overflow-x: auto; }
+  table { display: block; overflow-x: auto; white-space: nowrap; }
+  .inline { flex-direction: column; align-items: stretch !important; }
+  .inline > .field { min-width: 0 !important; }
+}
+
 .media-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
               gap: 12px; }
 .media-item { border: 1px solid var(--border); border-radius: 10px; overflow: hidden;
@@ -112,10 +129,14 @@ input:focus, select:focus, textarea:focus { outline: 2px solid #bfdbfe; border-c
 
 #toast { position: fixed; bottom: 22px; right: 22px; z-index: 100; display: flex;
          flex-direction: column; gap: 8px; }
-.toast { background: var(--text); color: #fff; padding: 11px 16px; border-radius: 10px;
-         font-size: 14px; animation: fadein .2s ease-out; max-width: 360px; }
+.toast { background: var(--text); color: #fff; padding: 11px 16px;
+         border-radius: 10px; font-size: 14px; cursor: pointer;
+         animation: fadein .2s ease-out; max-width: 360px; }
 .toast.error { background: var(--danger); }
 @keyframes fadein { from { opacity: 0; transform: translateY(6px); } }
+
+/* Zeile wird gerade bearbeitet (Bekanntmachungen/Veranstaltungen) */
+tr.editing td { background: #e0f2fe; }
 
 .muted { color: var(--muted); font-size: 13px; }
 .mt { margin-top: 14px; }

@@ -166,6 +166,35 @@ Details: [docs/ARCHITEKTUR.md](docs/ARCHITEKTUR.md)
 ```
 pytest .................. 48 passed (Vorlagen, Add-Widget-Slots, Background-
                           Roundtrip, Rollen-Matrix, ICS, Rate-Limit …)
+
+## 🧭 UX & Stabilität (v0.5.1)
+
+**Behobene Bugs**
+- `/konto`: Passwort-Formular hatte keinen Submit-Handler (lief ins Leere)
+- `/gestalten`: admin.js doppelt geladen → Widgets/Vorlagen wurden
+  **zweimal** angelegt
+- Editor: Wechsel/Laden verwirft ungespeicherte Änderungen jetzt nur
+  nach Rückfrage
+- Display: Uhr-Intervalle stapelten sich bei jedem Layout-Reload
+  (CPU-Leak im Dauerbetrieb) – jetzt zentrale Timer-Verwaltung
+
+**Verbessert**
+- Displays: 401 → Gerät registriert sich automatisch neu; 403 →
+  klarer Sperr-Screen, Selbstheilung bei Entsperrung
+- Doppelklick-Schutz (Busy-State) für alle speichernden Buttons
+  (Uploads, ICS-Import, Layout-/Zeitplan-Speichern, Vorlagen …)
+- Mediathek: Mehrfach-Upload, Suchfeld, Löschen warnt vor
+  verwendenden Widgets; Veranstaltungsliste mit Suche + „Vergangene
+  ausblenden"
+- Displays-Seite: Layout-/Zeitplan-Auswahl aktualisiert „Jetzt aktiv"
+  sofort; Sperr-Toggle aus Datenzustand; Modal schließt per ESC/
+  Backdrop-Klick
+- Bekanntmachungen/Veranstaltungen: Bearbeiten abbrechen + Zeilen-
+  Markierung, kein unnötiger Re-Fetch
+- Editor: Pfeiltasten-Nudging (Shift = 5 %), Widget kopieren/einfügen
+  (Strg+C/Strg+V, layoutübergreifend), Empty-States
+- Mobile: Sidebar wird zur Top-Leiste, Tabellen horizontal scrollbar
+- Toasts: klickbar schließbar, Fehler bleiben 8 s, Screenreader-Status
 Browser-E2E (Playwright). 2 passed – Editor-Flow im echten Chromium:
                           Add→Klick→Drag→„fest setzen“→Entf/✕→Persistenz
 Installer-E2E ........... 5/5 (Stub-Proxmox: Create/Kollision/Update/404)

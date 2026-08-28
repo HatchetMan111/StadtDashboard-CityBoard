@@ -125,4 +125,11 @@ body.previewing { cursor: auto; }
 .pair-card code { font-size: 4vmin; background: rgba(255,255,255,.08);
                   padding: 1vmin 2.4vmin; border-radius: 1vmin; }
 
+/* Sperr-Screen (Display im Admin deaktiviert) */
+.locked-screen { margin: auto; text-align: center; color: #cbd5e1;
+                 max-width: 70vw; }
+.locked-screen .lock-icon { font-size: 12vmin; margin-bottom: 2vmin; }
+.locked-screen h1 { font-size: 7vmin; color: #f1f5f9; margin-bottom: 1.5vmin; }
+.locked-screen p { font-size: 3vmin; line-height: 1.5; }
+
 .hidden { display: none !important; }
