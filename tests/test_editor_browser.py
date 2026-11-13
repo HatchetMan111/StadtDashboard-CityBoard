@@ -9,6 +9,7 @@ Deckt genau die gemeldeten Probleme ab:
 """
 from __future__ import annotations
 
+import sys
 import tempfile
 import time
 import urllib.request
@@ -28,7 +29,7 @@ def live_server():
     data_dir = tempfile.mkdtemp(prefix="sb-browser-")
     env = {**os.environ, "SB_DATA_DIR": data_dir}
     proc = subprocess.Popen(
-        [".venv/bin/python", "-m", "uvicorn", "app.main:app",
+        [sys.executable, "-m", "uvicorn", "app.main:app",
          "--port", str(PORT)],
         env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     )

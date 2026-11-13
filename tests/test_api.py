@@ -31,9 +31,13 @@ def test_healthz(client):
     assert body["app"] == "StadtDashboard"
 
 
-def test_admin_pages_redirect_to_login(client, fresh_db):
-    assert client.get("/", follow_redirects=False).status_code == 303
-    assert client.get("/displays", follow_redirects=False).headers["location"] == "/login"
+def test_admin_pages_serve_spa_shell(client, fresh_db):
+    """SPA-Architektur: Seiten liefern die Shell (200); die Auth-Prüfung
+    passiert clientseitig via /api/admin/me, die API bleibt hart geschützt."""
+    for path in ("/", "/displays", "/display"):
+        resp = client.get(path, follow_redirects=False)
+        assert resp.status_code == 200, path
+        assert "text/html" in resp.headers["content-type"], path
 
 
 def test_admin_api_requires_auth(client, fresh_db):

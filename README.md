@@ -7,6 +7,8 @@ installierbar als Proxmox-LXC mit einem Einzeiler.
 - **Admin-Cockpit** – Inhalte, Layouts, Geräte, Zeitpläne, Backup
 - **Display-Frontend** – schlanke Vollbild-Ansicht für TV/Monitor/Signage-Player
 - **API/Backend** – FastAPI + SQLite, REST + WebSocket, keine externen Cloud-Dienste
+- **Modernes UI** – React/Vite-SPA (Admin-Cockpit + Display-Client), Build committed,
+  läuft daher ohne Node im Container
 - **Drag-&-Drop-Layout-Editor** – Widgets auf die Fläche ziehen, skalieren,
   Medien per Klick zuweisen (Galerie/Bild/QR); Snap-Raster, Führungslinien,
   Undo (Strg+Z), Ebenen
@@ -153,8 +155,9 @@ Display-Browser ─┘        │              └─ REST (/api/display/*, /api
 
 * **Backend:** Python/FastAPI, SQLAlchemy 2, scrypt-Passwort-Hashing,
   HMAC-signierte Sessions, Gerätetoken je Display
-* **Frontend:** serverseitige Templates + Vanilla JS/CSS – bewusst ohne Build-Kette
-  und ohne externe Abhängigkeiten
+* **Frontend:** React/Vite-SPA (Admin + Display-Client) – gebaute Artefakte liegen
+  unter `app/spa/` im Repo, der Container braucht daher **kein Node**; externe
+  Abhängigkeiten: keine (System-Fonts, keine CDNs)
 * **Scheduling:** Server wählt je Uhrzeit/Wochentag/Priorität das Layout;
   Displays rendern nur noch
 * Lizenz: **AGPL-3.0**
@@ -164,8 +167,9 @@ Details: [docs/ARCHITEKTUR.md](docs/ARCHITEKTUR.md)
 ## ✅ Verifikation
 
 ```
-pytest .................. 48 passed (Vorlagen, Add-Widget-Slots, Background-
-                          Roundtrip, Rollen-Matrix, ICS, Rate-Limit …)
+pytest .................. 53 passed (Vorlagen, Add-Widget-Slots, Background-
+                          Roundtrip, Rollen-Matrix, ICS, Rate-Limit, SPA-Shell,
+                          Layout-Referenz-Exaktheit, SVG-CSP …)
 
 ## 🧭 UX & Stabilität (v0.5.1)
 
@@ -202,6 +206,27 @@ bash -n + shellcheck .... outer/inner/e2e fehlerfrei
 ```
 
 Browser-Tests benötigen einmalig: `pip install -r requirements-dev.txt && playwright install chromium`
+
+## 🧩 v0.6.0 – React/Vite-Umbau
+
+**Neu**
+- Kompletter UI-Neubau: Admin-Cockpit + Display-Client als React/Vite-SPA
+  (`frontend/` → gebaut nach `app/spa/`, beides committed)
+- Dunkelmodus (folgt dem System), überarbeitete Karten/Tabellen/Buttons,
+  Toasts mit aria-live, modale Dialoge statt window.confirm im Admin
+- Neue API `GET /api/admin/me` (Rolle/Name) für die SPA-Rollensteuerung
+
+**Behobene Bugs**
+- Layout löschen: Zeitplan-Referenzen wurden per LIKE-Prefix gesucht –
+  „Layout 1 löschen“ schlug fehl, wenn Layout 12/1xx referenziert war
+- Display-PATCH: beliebige `orientation` und nicht existierende Layout-/
+  Zeitplan-IDs wurden akzeptiert → jetzt Validierung (400)
+- SVG-Medien wurden ohne CSP ausgeliefert (Skripte in SVG wären auf dem
+  gleichen Origin gelaufen) → `Content-Security-Policy: sandbox`
+- Editor-Undo bei Zahlenfeldern hob die falsche Stufe auf (pushte den
+  bereits geänderten Zustand) – React-Neubau mit echten Vorher-Snapshots
+- Login-Rate-Limit-Speicher wuchs unbegrenzt → leere Einträge werden geräumt
+- WebSocket 4401 (Token entzogen) löst jetzt Selbstheilung aus
 
 
 Ein echter LXC-Durchlauf muss auf einem Proxmox-Host erfolgen:

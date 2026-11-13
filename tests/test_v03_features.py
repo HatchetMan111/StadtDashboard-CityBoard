@@ -80,9 +80,10 @@ def test_editor_role_matrix(admin_client):
         # Verweigert: Benutzerverwaltung
         assert ed.get("/api/admin/users").status_code == 403
 
-        # Seiten-Schutz: Editor wird von Admin-Seiten zum Dashboard umgeleitet
-        assert ed.get("/settings", follow_redirects=False).headers["location"] == "/"
-        assert ed.get("/displays", follow_redirects=False).headers["location"] == "/"
+        # Seiten: SPA-Shell wird ausgeliefert (Routen-Guard schützt clientseitig,
+        # die harten Daten sind auf API-Ebene 403-geschützt – siehe oben).
+        assert ed.get("/settings").status_code == 200
+        assert ed.get("/displays").status_code == 200
 
     # Selbst-Löschung + letzter Admin-Schutz
     me_id = next(u["id"] for u in admin_client.get("/api/admin/users").json()

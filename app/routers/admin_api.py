@@ -62,6 +62,10 @@ _login_failures: dict[str, list[float]] = {}
 
 def _rate_limited(key: str) -> tuple[bool, int]:
     now = _time.monotonic()
+    # Fenster gleitend halten und leere Keys entsorgen (sonst waechst
+    # das Dict mit jeder erfundenen Username-Kombination unbegrenzt).
+    for k in [k for k, v in _login_failures.items() if not v]:
+        del _login_failures[k]
     attempts = [t for t in _login_failures.get(key, []) if now - t < RATE_LIMIT_WINDOW]
     _login_failures[key] = attempts
     return len(attempts) >= RATE_LIMIT_MAX, RATE_LIMIT_MAX - len(attempts)
@@ -211,6 +215,15 @@ def admin_status(
     }
 
 
+@router.get("/me")
+def admin_me(request_user: AdminUser = Depends(require_admin)) -> dict:
+    """Wer bin ich? Fuer die SPA: Rolle steuert Navigation & Rechte."""
+    return {
+        "username": request_user.username,
+        "role": getattr(request_user, "role", "admin"),
+    }
+
+
 # ── Displays ────────────────────────────────────────────────────────────────
 def _display_online(display: Display) -> bool:
     return bool(
@@ -254,7 +267,20 @@ async def patch_display(
     d = db.get(Display, device_id)
     if not d:
         raise HTTPException(status_code=404, detail="Display nicht gefunden")
-    for key, value in body.model_dump(exclude_unset=True).items():
+    changes = body.model_dump(exclude_unset=True)
+    # Validierung: sonst landen Tippfehler als danglende Referenzen in der DB
+    # (SQLite erzwingt Foreign Keys per Default nicht).
+    if "orientation" in changes and changes["orientation"] not in (
+            "landscape", "portrait"):
+        raise HTTPException(status_code=400,
+                            detail="orientation muss 'landscape' oder 'portrait' sein")
+    if changes.get("layout_id") is not None and \
+            not db.get(Layout, changes["layout_id"]):
+        raise HTTPException(status_code=400, detail="Layout nicht gefunden")
+    if changes.get("schedule_id") is not None and \
+            not db.get(Schedule, changes["schedule_id"]):
+        raise HTTPException(status_code=400, detail="Zeitplan nicht gefunden")
+    for key, value in changes.items():
         setattr(d, key, value)
     db.commit()
     await notify_displays()
@@ -899,11 +925,15 @@ async def delete_layout(
         raise HTTPException(status_code=404, detail="Layout nicht gefunden")
     if l_.is_default:
         raise HTTPException(status_code=400, detail="Standardlayout kann nicht geloescht werden")
-    used = (
-        db.query(Schedule).filter(Schedule.rules.like(f'%\"layout_id\": {item_id}%')).count()
-        + db.query(Display).filter(Display.layout_id == item_id).count()
+    # Referenzen exakt pruefen: ein LIKE auf "layout_id": 1 wuerde fälschlich
+    # auch 12/100 matchen (Prefix) – daher JSON-Regeln direkt auswerten.
+    schedule_uses = any(
+        rule.get("layout_id") == item_id
+        for s in db.query(Schedule).all()
+        for rule in (s.rules or [])
     )
-    if used:
+    display_uses = db.query(Display).filter(Display.layout_id == item_id).count()
+    if schedule_uses or display_uses:
         raise HTTPException(status_code=409, detail="Layout wird noch verwendet")
     db.delete(l_)
     db.commit()

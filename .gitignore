@@ -6,3 +6,4 @@ venv/
 data/
 *.log
 .DS_Store
+frontend/node_modules/

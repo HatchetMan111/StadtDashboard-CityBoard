@@ -46,7 +46,14 @@ def media_file(item_id: int, db: Session = Depends(get_db)):
     path = config.UPLOAD_DIR / item.filename
     if not path.is_file():
         raise HTTPException(status_code=404, detail="Datei fehlt")
-    return FileResponse(path, media_type=item.mime or "application/octet-stream")
+    headers = {}
+    if item.filename.lower().endswith(".svg"):
+        # SVG kann Skripte enthalten und wird vom selben Origin ausgeliefert
+        # → CSP-Sandbox entzieht eingebettetem JS die Kraft, ohne dass
+        # <img src>/Embeds kaputtgehen.
+        headers["Content-Security-Policy"] = "sandbox"
+    return FileResponse(path, media_type=item.mime or "application/octet-stream",
+                        headers=headers)
 
 
 @router.get("/media/{item_id}/thumb")

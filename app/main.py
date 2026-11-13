@@ -44,6 +44,12 @@ async def on_startup() -> None:
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
+# Vite-Build-Artefakte (Admin-SPA + Display-Client) mit Hash im Dateinamen:
+# 1 Jahr cachen – bei jedem Build neue Namen → nie veraltete Assets.
+ASSETS_DIR = Path(__file__).resolve().parent / "spa" / "assets"
+if ASSETS_DIR.is_dir():
+    app.mount("/assets", StaticFiles(directory=str(ASSETS_DIR)), name="assets")
+
 app.include_router(pages.router)
 app.include_router(display_api.router)
 app.include_router(admin_api.router)
